@@ -24,11 +24,11 @@ SOURCES = {
         "split":   "train",
         "field":   "text",
     },
-    "pg19": {
-        "dataset": "pg19",
+    "gutenberg": {
+        "dataset": "sedthh/gutenberg_english",
         "config":  None,
         "split":   "train",
-        "field":   "text",
+        "field":   "TEXT",
     },
 }
 
@@ -36,7 +36,7 @@ SOURCES = {
 def fetch_docs(source_key: str, n: int, min_words: int, out_dir: str, offset: int = 0):
     src = SOURCES[source_key]
     print(f"  Loading {src['dataset']} …")
-    kwargs = dict(split=src["split"], streaming=True, trust_remote_code=True)
+    kwargs = dict(split=src["split"], streaming=True)
     if src["config"]:
         kwargs["name"] = src["config"]
     ds = load_dataset(src["dataset"], **kwargs)
@@ -75,7 +75,7 @@ def main():
     print(f"Target: {n_wiki} Wikipedia + {n_pg19} PG-19  →  {args.out_dir}")
 
     saved_wiki = fetch_docs("wiki", n_wiki, args.min_words, args.out_dir, offset=0)
-    fetch_docs("pg19", n_pg19, args.min_words, args.out_dir, offset=saved_wiki)
+    fetch_docs("gutenberg", n_pg19, args.min_words, args.out_dir, offset=saved_wiki)
 
     total = len([f for f in os.listdir(args.out_dir) if f.endswith(".txt")])
     print(f"\nTotal docs in {args.out_dir}: {total}")
