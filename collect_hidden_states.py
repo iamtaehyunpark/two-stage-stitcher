@@ -39,12 +39,12 @@ def load_source_model(cfg: StitcherConfig):
 def load_target_model(cfg: StitcherConfig):
     dtype = getattr(torch, cfg.dtype)
     tokenizer = AutoTokenizer.from_pretrained(cfg.target_model)
+    max_memory = {i: "70GiB" for i in cfg.llama_devices}
     model = AutoModelForCausalLM.from_pretrained(
         cfg.target_model,
         torch_dtype=dtype,
-        # Distributes across cuda:0-2; leave cuda:3 for Qwen + MLP
         device_map="sequential",
-        max_memory={0: "70GiB", 1: "70GiB", 2: "70GiB"},
+        max_memory=max_memory,
         output_hidden_states=True,
     )
     model.eval()

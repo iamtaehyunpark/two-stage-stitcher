@@ -43,6 +43,9 @@ class StitcherConfig:
     top_k_retrieval: int = 1        # must rank correct pair at position ≤ this
 
     # Hardware
-    source_device: str = "cuda:3"   # Qwen + MLP on GPU 3
-    # Llama spreads across cuda:0, cuda:1, cuda:2 via device_map="auto"
+    # These are *logical* indices within CUDA_VISIBLE_DEVICES, not physical GPU IDs.
+    # Set CUDA_VISIBLE_DEVICES in the environment to select which physical GPUs to use.
+    # Layout: cuda:3 = Qwen + MLP, cuda:0-2 = Llama (tensor-parallel over 3 cards)
+    source_device: str = "cuda:3"
+    llama_devices: tuple = (0, 1, 2)   # logical indices for Llama shards
     dtype: str = "bfloat16"

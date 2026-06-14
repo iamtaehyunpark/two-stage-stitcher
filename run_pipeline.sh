@@ -5,6 +5,34 @@ export HF_HOME=/data/tpark45/hugginface
 export TRANSFORMERS_CACHE="${HF_HOME}/hub"
 export HF_DATASETS_CACHE="${HF_HOME}/datasets"
 
+# ── GPU selection ─────────────────────────────────────────────────────────────
+# Set CUDA_VISIBLE_DEVICES to the 4 physical GPU IDs you want to use.
+# Inside the code, logical indices are always 0-3:
+#   cuda:0, cuda:1, cuda:2  → Llama-70B shards
+#   cuda:3                  → Qwen-7B + MLP training
+#
+# Default: use whichever 4 GPUs are visible (e.g. set by SLURM automatically).
+# Override example: CUDA_VISIBLE_DEVICES=4,5,6,7 ./run_pipeline.sh
+if [ -z "${CUDA_VISIBLE_DEVICES:-}" ]; then
+    # Auto-select 4 GPUs with the most free memory
+    CUDA_VISIBLE_DEVICES=$(python3 - <<'EOF'
+import subprocess, json
+out = subprocess.check_output([
+    "nvidia-smi", "--query-gpu=index,memory.free",
+    "--format=csv,noheader,nounits"
+]).decode()
+gpus = sorted(
+    [(int(line.split(",")[0]), int(line.split(",")[1].strip()))
+     for line in out.strip().splitlines()],
+    key=lambda x: -x[1]   # descending free memory
+)
+print(",".join(str(g[0]) for g in gpus[:4]))
+EOF
+)
+    export CUDA_VISIBLE_DEVICES
+fi
+echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}"
+
 # ── Virtual environment ───────────────────────────────────────────────────────
 VENV_DIR="$(dirname "$0")/.venv"
 
@@ -33,8 +61,9 @@ STITCHER_CKPT="${OUT_DIR}/stitcher_best.pt"
 mkdir -p "${TRAIN_HS_DIR}" "${VAL_HS_DIR}" "${OUT_DIR}"
 
 echo "============================================================"
-echo " HF_HOME : ${HF_HOME}"
-echo " Docs    : ${DOCS_DIR}"
+echo " HF_HOME              : ${HF_HOME}"
+echo " CUDA_VISIBLE_DEVICES : ${CUDA_VISIBLE_DEVICES}"
+echo " Docs                 : ${DOCS_DIR}"
 echo "============================================================"
 
 # ── Phase 1: collect hidden states ───────────────────────────────────────────
