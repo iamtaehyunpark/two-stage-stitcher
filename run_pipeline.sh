@@ -34,7 +34,7 @@ fi
 echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}"
 
 # ── Virtual environment ───────────────────────────────────────────────────────
-VENV_DIR="${VENV_DIR:-/data/tpark45/engramtrace_env}"
+VENV_DIR="${VENV_DIR:-/data/tpark45/engramtrace-env}"
 
 if [ ! -f "${VENV_DIR}/bin/activate" ]; then
     echo "ERROR: venv not found at ${VENV_DIR}" >&2
