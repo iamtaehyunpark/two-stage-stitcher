@@ -4,7 +4,12 @@ set -euo pipefail
 export HF_HOME=/data/tpark45/hugginface
 
 # ── HuggingFace auth ──────────────────────────────────────────────────────────
-export HF_TOKEN="your_token_here"
+# Pass your token at runtime: HF_TOKEN=hf_... ./run_pipeline.sh
+if [ -z "${HF_TOKEN:-}" ]; then
+    echo "ERROR: HF_TOKEN is not set. Run as: HF_TOKEN=hf_... ./run_pipeline.sh" >&2
+    exit 1
+fi
+export HF_TOKEN
 
 # ── GPU selection ─────────────────────────────────────────────────────────────
 # Set CUDA_VISIBLE_DEVICES to the 4 physical GPU IDs you want to use.
