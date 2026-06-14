@@ -3,6 +3,18 @@ set -euo pipefail
 
 export HF_HOME=/data/tpark45/hugginface
 
+# ── HuggingFace auth ──────────────────────────────────────────────────────────
+# Llama-3.1 is gated. Either run `huggingface-cli login` once, or set HF_TOKEN.
+if [ -z "${HF_TOKEN:-}" ]; then
+    TOKEN_FILE="${HF_HOME}/token"
+    if [ -f "${TOKEN_FILE}" ]; then
+        export HF_TOKEN=$(cat "${TOKEN_FILE}")
+    else
+        echo "WARNING: HF_TOKEN not set and no token found at ${TOKEN_FILE}." >&2
+        echo "         Run: huggingface-cli login" >&2
+    fi
+fi
+
 # ── GPU selection ─────────────────────────────────────────────────────────────
 # Set CUDA_VISIBLE_DEVICES to the 4 physical GPU IDs you want to use.
 # Inside the code, logical indices are always 0-3:
