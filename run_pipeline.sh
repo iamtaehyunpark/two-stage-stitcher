@@ -55,7 +55,8 @@ source "${VENV_DIR}/bin/activate"
 echo "Using Python: $(which python)"
 
 # ── Paths (override via env if needed) ───────────────────────────────────────
-DOCS_DIR="${DOCS_DIR:-data/raw_documents}"
+DOCS_DIR="${DOCS_DIR:-/data/tpark45/docs}"
+NUM_DOCS="${NUM_DOCS:-500}"
 TRAIN_HS_DIR="${TRAIN_HS_DIR:-data/hidden_states/train}"
 VAL_HS_DIR="${VAL_HS_DIR:-data/hidden_states/val}"
 SVD_CKPT="${SVD_CKPT:-checkpoints/w_optimal.pt}"
@@ -69,6 +70,18 @@ echo " HF_HOME              : ${HF_HOME}"
 echo " CUDA_VISIBLE_DEVICES : ${CUDA_VISIBLE_DEVICES}"
 echo " Docs                 : ${DOCS_DIR}"
 echo "============================================================"
+
+# ── Phase 0: download dataset ────────────────────────────────────────────────
+echo ""
+echo "[Phase 0] Downloading documents …"
+EXISTING=$(find "${DOCS_DIR}" -name "*.txt" 2>/dev/null | wc -l)
+if [ "${EXISTING}" -ge "${NUM_DOCS}" ]; then
+    echo "  ${EXISTING} docs already present in ${DOCS_DIR}, skipping download"
+else
+    python download_data.py \
+        --out-dir "${DOCS_DIR}" \
+        --num-docs "${NUM_DOCS}"
+fi
 
 # ── Phase 1: collect hidden states ───────────────────────────────────────────
 echo ""
