@@ -34,16 +34,10 @@ fi
 echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}"
 
 # ── Virtual environment ───────────────────────────────────────────────────────
-VENV_DIR="$(dirname "$0")/.venv"
-
-# Pass --install as the first argument to create/update the venv first.
-if [[ "${1:-}" == "--install" ]]; then
-    shift
-    bash "$(dirname "$0")/install_deps.sh"
-fi
+VENV_DIR="${VENV_DIR:-/data/tpark45/engramtrace_env}"
 
 if [ ! -f "${VENV_DIR}/bin/activate" ]; then
-    echo "ERROR: venv not found at ${VENV_DIR}. Run: bash install_deps.sh" >&2
+    echo "ERROR: venv not found at ${VENV_DIR}" >&2
     exit 1
 fi
 # shellcheck disable=SC1091
