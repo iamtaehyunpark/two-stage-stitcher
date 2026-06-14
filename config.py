@@ -6,7 +6,7 @@ from typing import Optional
 class StitcherConfig:
     # Models
     source_model: str = "Qwen/Qwen2.5-7B-Instruct"
-    target_model: str = "meta-llama/Llama-3.1-70B-Instruct"
+    target_model: str = "deepseek-ai/DeepSeek-R1-Distill-Llama-70B"
 
     # Dimensions
     src_dim: int = 3584   # Qwen2.5-7B hidden size
