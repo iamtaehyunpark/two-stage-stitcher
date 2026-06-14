@@ -1,0 +1,6 @@
+# Install PyTorch separately via install_deps.sh (requires --index-url for cu126)
+transformers>=4.40.0
+accelerate>=0.34.0
+numpy>=1.26.0
+scipy>=1.12.0
+tqdm>=4.66.0
