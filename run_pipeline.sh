@@ -2,8 +2,6 @@
 set -euo pipefail
 
 export HF_HOME=/data/tpark45/hugginface
-export TRANSFORMERS_CACHE="${HF_HOME}/hub"
-export HF_DATASETS_CACHE="${HF_HOME}/datasets"
 
 # ── GPU selection ─────────────────────────────────────────────────────────────
 # Set CUDA_VISIBLE_DEVICES to the 4 physical GPU IDs you want to use.
@@ -64,17 +62,23 @@ echo "============================================================"
 echo ""
 echo "[Phase 1] Collecting hidden states …"
 
-# Split raw docs 95/5 into train/val by filename
+# Split raw docs 95/5 into train/val by filename.
+# When there are too few docs to split, all go to train and val reuses them.
 ALL_DOCS=( "${DOCS_DIR}"/*.txt )
 TOTAL=${#ALL_DOCS[@]}
-VAL_COUNT=$(( TOTAL / 20 ))     # ~5 %
-VAL_COUNT=$(( VAL_COUNT < 1 ? 1 : VAL_COUNT ))
-TRAIN_COUNT=$(( TOTAL - VAL_COUNT ))
 
-TRAIN_DOCS=( "${ALL_DOCS[@]:0:${TRAIN_COUNT}}" )
-VAL_DOCS=( "${ALL_DOCS[@]:${TRAIN_COUNT}}" )
-
-echo "  Total docs: ${TOTAL}  →  train: ${TRAIN_COUNT}  val: ${VAL_COUNT}"
+if [ "${TOTAL}" -lt 2 ]; then
+    TRAIN_DOCS=( "${ALL_DOCS[@]}" )
+    VAL_DOCS=( "${ALL_DOCS[@]}" )
+    echo "  Total docs: ${TOTAL}  →  train: ${TOTAL}  val: ${TOTAL} (too few to split)"
+else
+    VAL_COUNT=$(( TOTAL / 20 ))
+    VAL_COUNT=$(( VAL_COUNT < 1 ? 1 : VAL_COUNT ))
+    TRAIN_COUNT=$(( TOTAL - VAL_COUNT ))
+    TRAIN_DOCS=( "${ALL_DOCS[@]:0:${TRAIN_COUNT}}" )
+    VAL_DOCS=( "${ALL_DOCS[@]:${TRAIN_COUNT}}" )
+    echo "  Total docs: ${TOTAL}  →  train: ${TRAIN_COUNT}  val: ${VAL_COUNT}"
+fi
 
 python collect_hidden_states.py \
     --documents "${TRAIN_DOCS[@]}" \
