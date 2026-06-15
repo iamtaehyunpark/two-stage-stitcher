@@ -17,7 +17,7 @@ class StitcherConfig:
     # Data collection
     chunk_size: int = 1024           # tokens per progressive chunk
     max_chunks_per_doc: int = 16     # up from 8 — more pairs per doc
-    data_dir: str = "data/hidden_states"
+    data_dir: str = "data/hidden_states/train"
     output_dir: str = "checkpoints"
 
     # SVD alignment (Stage 1)
