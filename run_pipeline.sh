@@ -56,7 +56,7 @@ echo "Using Python: $(which python)"
 
 # ── Paths (override via env if needed) ───────────────────────────────────────
 DOCS_DIR="${DOCS_DIR:-/data/tpark45/docs}"
-NUM_DOCS="${NUM_DOCS:-500}"
+NUM_DOCS="${NUM_DOCS:-2000}"
 TRAIN_HS_DIR="${TRAIN_HS_DIR:-data/hidden_states/train}"
 VAL_HS_DIR="${VAL_HS_DIR:-data/hidden_states/val}"
 SVD_CKPT="${SVD_CKPT:-checkpoints/w_optimal.pt}"
