@@ -28,90 +28,68 @@ from collect_hidden_states import extract_qwen_hidden, load_source_model
 
 # ── Llama split-forward helpers ───────────────────────────────────────────────
 
-def _rope(model, hidden, position_ids):
-    """Compute RoPE (cos, sin) — compatible with transformers >= 4.40."""
-    return model.model.rotary_emb(hidden, position_ids)
-
-
-def llama_embed_and_early_layers(model, input_ids, target_layer: int):
-    """
-    Run Llama embedding + layers 0…target_layer-1.
-    Returns hidden states at layer `target_layer`.
-    """
-    hidden = model.model.embed_tokens(input_ids)
-    position_ids = torch.arange(input_ids.shape[-1], device=input_ids.device).unsqueeze(0)
-    position_embeddings = _rope(model, hidden, position_ids)
-
-    for i, layer in enumerate(model.model.layers):
-        if i >= target_layer:
-            break
-        layer_out = layer(
-            hidden,
-            attention_mask=None,
-            position_ids=position_ids,
-            past_key_value=None,
-            output_attentions=False,
-            use_cache=False,
-            position_embeddings=position_embeddings,
-        )
-        hidden = layer_out[0]
-
-    return hidden   # (1, seq_len_query, tgt_dim)
-
-
-def llama_late_layers_and_generate(
+def generate_with_injection(
     model,
     tokenizer,
-    hidden: torch.Tensor,        # (1, total_seq, tgt_dim)  after prefix injection
+    x_final: torch.Tensor,       # (1, tgt_dim) — document representation in layer-`target_layer` space
+    query: str,
     target_layer: int,
-    max_new_tokens: int = 512,
-):
+    max_new_tokens: int = 256,
+) -> str:
     """
-    Run Llama layers target_layer…80 and decode output tokens.
-    `hidden` already contains the document prefix + query hidden states
-    concatenated at layer `target_layer`.
+    Inject `x_final` at `target_layer` and let the model's own generate() do the rest.
+
+    Mechanism:
+      1. Prepend ONE dummy token to the query so every layer sees a uniform
+         sequence length (keeps the KV cache + attention mask consistent —
+         transformers handles all of that for us).
+      2. A forward-pre-hook on `model.model.layers[target_layer]` overwrites the
+         dummy position's hidden state with `x_final` on the prefill pass only
+         (seq_len > 1). From layer `target_layer` onward, position 0 carries the
+         document representation, and it lands in the KV cache like a normal token.
+      3. During decoding (seq_len == 1) the hook is a no-op, so each generated
+         token attends to the full [x_final, query, generated…] context via the
+         cache — no context loss, no manual RoPE, no version drift.
     """
-    seq_len = hidden.shape[1]
-    position_ids = torch.arange(seq_len, device=hidden.device).unsqueeze(0)
-    position_embeddings = _rope(model, hidden, position_ids)
+    embed_device = model.model.embed_tokens.weight.device
 
-    for i in range(target_layer, len(model.model.layers)):
-        layer_out = model.model.layers[i](
-            hidden,
-            attention_mask=None,
-            position_ids=position_ids,
-            past_key_value=None,
-            output_attentions=False,
-            use_cache=False,
-            position_embeddings=position_embeddings,
-        )
-        hidden = layer_out[0]
+    query_ids = tokenizer(query, return_tensors="pt").input_ids
+    dummy_id = tokenizer.bos_token_id
+    if dummy_id is None:
+        dummy_id = tokenizer.eos_token_id
+    dummy = torch.tensor([[dummy_id]], dtype=query_ids.dtype)
+    input_ids = torch.cat([dummy, query_ids], dim=1).to(embed_device)
+    attention_mask = torch.ones_like(input_ids)
 
-    hidden = model.model.norm(hidden)
-    logits = model.lm_head(hidden)     # (1, seq_len, vocab)
+    x = x_final.reshape(1, -1)   # (1, tgt_dim)
+    layer = model.model.layers[target_layer]
 
-    generated = []
-    next_token = logits[0, -1, :].argmax(dim=-1, keepdim=True)   # (1,)
-    generated.append(next_token.item())
+    def pre_hook(module, args, kwargs):
+        hs = kwargs.get("hidden_states", args[0] if args else None)
+        if hs is None or hs.shape[1] <= 1:      # decode step → leave untouched
+            return None
+        hs = hs.clone()
+        hs[:, 0, :] = x.to(hs.device, hs.dtype)
+        if "hidden_states" in kwargs:
+            kwargs["hidden_states"] = hs
+            return args, kwargs
+        return (hs,) + tuple(args[1:]), kwargs
 
-    for _ in range(max_new_tokens - 1):
-        embed = model.model.embed_tokens(next_token.unsqueeze(0))   # (1, 1, D)
-        pos = torch.tensor([[seq_len + len(generated) - 1]], device=hidden.device)
-        pe = _rope(model, embed, pos)
-        for layer in model.model.layers[target_layer:]:
-            out = layer(embed, attention_mask=None, position_ids=pos,
-                        past_key_value=None, output_attentions=False, use_cache=False,
-                        position_embeddings=pe)
-            embed = out[0]
-        embed = model.model.norm(embed)
-        logits = model.lm_head(embed)
-        next_token = logits[0, -1, :].argmax(dim=-1, keepdim=True)
-        token_id = next_token.item()
-        generated.append(token_id)
-        if token_id == tokenizer.eos_token_id:
-            break
+    handle = layer.register_forward_pre_hook(pre_hook, with_kwargs=True)
+    try:
+        with torch.no_grad():
+            out = model.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                pad_token_id=tokenizer.eos_token_id,
+            )
+    finally:
+        handle.remove()
 
-    return tokenizer.decode(generated, skip_special_tokens=True)
+    generated = out[0][input_ids.shape[1]:]
+    return tokenizer.decode(generated, skip_special_tokens=True).strip()
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -138,20 +116,10 @@ def run_inference(
         x_final = stitcher(x_qwen)                    # (1, tgt_dim)
     x_final = x_final.to(llama_device)                # move to Llama shards
 
-    # Step 2: Encode query and run early Llama layers
-    print("Running Llama early layers on query …")
-    query_ids = llama_tok(query, return_tensors="pt").input_ids.to(llama_device)
-    query_hidden = llama_embed_and_early_layers(llama_model, query_ids, cfg.target_layer)
-    # query_hidden: (1, query_len, tgt_dim)
-
-    # Step 3: Prepend x_final as a single-token soft prefix at layer `target_layer`
-    prefix = x_final.unsqueeze(1)                     # (1, 1, tgt_dim)
-    combined = torch.cat([prefix, query_hidden], dim=1)  # (1, 1+query_len, tgt_dim)
-
-    # Step 4: Run late layers and generate
+    # Step 2: Inject at `target_layer` and generate via the model's own forward
     print("Generating …")
-    response = llama_late_layers_and_generate(
-        llama_model, llama_tok, combined, cfg.target_layer
+    response = generate_with_injection(
+        llama_model, llama_tok, x_final, query, cfg.target_layer
     )
     return response
 

@@ -89,7 +89,7 @@ def run_conditions_abc(qa_pairs: list, ckpt_path: str, skip_b: bool = False, ans
     import torch
     from config import StitcherConfig
     from collect_hidden_states import load_source_model, load_target_model, extract_qwen_hidden
-    from inference import llama_embed_and_early_layers, llama_late_layers_and_generate
+    from inference import generate_with_injection
 
     cfg = StitcherConfig()
     dtype = getattr(torch, cfg.dtype)
@@ -135,12 +135,9 @@ def run_conditions_abc(qa_pairs: list, ckpt_path: str, skip_b: bool = False, ans
             x_qwen = x_qwen.unsqueeze(0).to(cfg.source_device, dtype=dtype)
             with torch.no_grad():
                 x_final = stitcher(x_qwen).to(llama_device)
-            query_ids = llama_tok(qa["question"], return_tensors="pt").input_ids.to(llama_device)
-            query_hidden = llama_embed_and_early_layers(llama_model, query_ids, cfg.target_layer)
-            prefix = x_final.unsqueeze(1)
-            combined = torch.cat([prefix, query_hidden], dim=1)
-            answer = llama_late_layers_and_generate(
-                llama_model, llama_tok, combined, cfg.target_layer, max_new_tokens=256
+            answer = generate_with_injection(
+                llama_model, llama_tok, x_final, qa["question"],
+                cfg.target_layer, max_new_tokens=256,
             )
             answers_b.append(answer)
         print(f"\n  Done. {len(answers_b)} answers.")
