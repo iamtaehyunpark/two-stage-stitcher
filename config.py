@@ -23,9 +23,9 @@ class StitcherConfig:
     # SVD alignment (Stage 1)
     svd_checkpoint: str = "checkpoints/w_optimal.pt"
 
-    # MLP (Stage 2)
-    mlp_hidden_dim: int = 8192       # up from 4096 — match target hidden dim
-    mlp_num_layers: int = 4          # up from 3
+    # MLP (Stage 2) — keep original architecture to stay compatible with existing checkpoints
+    mlp_hidden_dim: int = 4096
+    mlp_num_layers: int = 3
     mlp_dropout: float = 0.0
 
     # Training

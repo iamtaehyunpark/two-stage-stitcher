@@ -74,7 +74,8 @@ def combined_loss(
 
 # ── Training loop ─────────────────────────────────────────────────────────────
 
-def train(cfg: StitcherConfig, data_dir: str, svd_ckpt: str, out_dir: str):
+def train(cfg: StitcherConfig, data_dir: str, svd_ckpt: str, out_dir: str,
+          resume_ckpt: str = None):
     os.makedirs(out_dir, exist_ok=True)
     device = torch.device(cfg.source_device)
     dtype = getattr(torch, cfg.dtype)
@@ -84,6 +85,18 @@ def train(cfg: StitcherConfig, data_dir: str, svd_ckpt: str, out_dir: str):
 
     # Build model
     model = LatentStitcher(cfg, W_optimal).to(device).to(dtype)
+
+    # Resume from checkpoint if provided
+    start_epoch = 1
+    best_val_loss = float("inf")
+    epochs_no_improve = 0
+    if resume_ckpt and os.path.isfile(resume_ckpt):
+        ckpt = torch.load(resume_ckpt, map_location="cpu", weights_only=False)
+        model.load_state_dict(ckpt["model_state"])
+        start_epoch = ckpt["epoch"] + 1
+        best_val_loss = ckpt["val_loss"]
+        print(f"Resumed from {resume_ckpt}  "
+              f"(epoch {ckpt['epoch']}, val_loss={best_val_loss:.4f})")
 
     # Dataset split
     dataset = HiddenStatePairDataset(data_dir)
@@ -107,10 +120,11 @@ def train(cfg: StitcherConfig, data_dir: str, svd_ckpt: str, out_dir: str):
     scheduler = SequentialLR(optimizer, schedulers=[warmup, cosine],
                              milestones=[cfg.warmup_steps])
 
-    best_val_loss = float("inf")
-    epochs_no_improve = 0
+    # Fast-forward scheduler to match resumed epoch
+    for _ in range((start_epoch - 1) * len(train_loader)):
+        scheduler.step()
 
-    for epoch in range(1, cfg.num_epochs + 1):
+    for epoch in range(start_epoch, cfg.num_epochs + 1):
         # ── train ──
         model.train()
         train_loss = 0.0
@@ -181,6 +195,8 @@ def main():
     parser.add_argument("--data-dir", default=None)
     parser.add_argument("--svd-ckpt", default=None)
     parser.add_argument("--out-dir", default=None)
+    parser.add_argument("--resume", default=None,
+                        help="Path to checkpoint to resume training from")
     args = parser.parse_args()
 
     cfg = StitcherConfig()
@@ -189,6 +205,7 @@ def main():
         data_dir=args.data_dir or cfg.data_dir,
         svd_ckpt=args.svd_ckpt or cfg.svd_checkpoint,
         out_dir=args.out_dir or cfg.output_dir,
+        resume_ckpt=args.resume,
     )
 
 

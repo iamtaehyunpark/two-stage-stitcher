@@ -123,10 +123,17 @@ python svd_alignment.py \
 # ── Phase 3: train residual MLP ───────────────────────────────────────────────
 echo ""
 echo "[Phase 3] Training residual MLP …"
+RESUME_ARG=""
+if [ -f "${STITCHER_CKPT}" ]; then
+    echo "  Found existing checkpoint — resuming from ${STITCHER_CKPT}"
+    RESUME_ARG="--resume ${STITCHER_CKPT}"
+fi
+
 python train_mlp.py \
     --data-dir "${TRAIN_HS_DIR}" \
     --svd-ckpt "${SVD_CKPT}" \
-    --out-dir "${OUT_DIR}"
+    --out-dir "${OUT_DIR}" \
+    ${RESUME_ARG}
 
 # ── Phase 4: ablation validation ─────────────────────────────────────────────
 echo ""
