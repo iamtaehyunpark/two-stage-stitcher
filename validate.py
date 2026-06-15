@@ -112,7 +112,7 @@ def main():
     dtype = getattr(torch, cfg.dtype)
 
     print("Loading checkpoint …")
-    ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=True)
+    ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
     W_optimal = ckpt["model_state"]["stage1.W"]
     model = LatentStitcher(cfg, W_optimal).to(device).to(dtype)
     model.load_state_dict(ckpt["model_state"])
