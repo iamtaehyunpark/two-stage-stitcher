@@ -52,12 +52,10 @@ Layers 30 → 80 + query tokens → generation
 
 ## Models
 
-| Role | Model | Hidden dim | Context |
-|---|---|---|---|
-| Source (retrieval) | `Qwen/Qwen2.5-7B-Instruct` | 3584 | 128K |
-| Target (reasoning) | `deepseek-ai/DeepSeek-R1-Distill-Llama-70B` | 8192 | 128K |
-
-Both models are fully open — no HuggingFace authentication required.
+| Role               | Model                                         | Hidden dim | Context |
+| ------------------ | --------------------------------------------- | ---------- | ------- |
+| Source (retrieval) | `Qwen/Qwen2.5-7B-Instruct`                  | 3584       | 128K    |
+| Target (reasoning) | `deepseek-ai/DeepSeek-R1-Distill-Llama-70B` | 8192       | 128K    |
 
 ---
 
@@ -65,10 +63,10 @@ Both models are fully open — no HuggingFace authentication required.
 
 Designed for **4× NVIDIA H200 GPUs**:
 
-| GPU(s) | Role |
-|---|---|
+| GPU(s)                             | Role                                     |
+| ---------------------------------- | ---------------------------------------- |
 | `cuda:0`, `cuda:1`, `cuda:2` | DeepSeek-R1-70B shards (tensor parallel) |
-| `cuda:3` | Qwen-7B + MLP training |
+| `cuda:3`                         | Qwen-7B + MLP training                   |
 
 GPU assignment uses logical indices within `CUDA_VISIBLE_DEVICES`, not physical IDs — see [GPU Selection](#gpu-selection).
 
@@ -207,13 +205,14 @@ python validate.py \
 
 Reports:
 
-| Metric | Description |
-|---|---|
-| MSE | Mean squared error between translated and target hidden states |
-| Cosine similarity | Directional alignment (target: → 1.0) |
+| Metric                   | Description                                                                      |
+| ------------------------ | -------------------------------------------------------------------------------- |
+| MSE                      | Mean squared error between translated and target hidden states                   |
+| Cosine similarity        | Directional alignment (target: → 1.0)                                           |
 | Top-1 retrieval accuracy | Does `x_final` rank closest to its correct `y` in the gallery? (target: 1.0) |
 
 Quality gates:
+
 - MSE must decrease from Stage 1 → Full pipeline
 - Cosine similarity must increase
 - Top-1 accuracy is reported with a warning if below 1.0
@@ -239,18 +238,18 @@ The document never passes through DeepSeek's early layers — only Qwen processe
 
 All parameters live in `config.py`. Key values:
 
-| Parameter | Default | Description |
-|---|---|---|
-| `target_layer` | 30 | DeepSeek layer to extract from and inject into |
-| `chunk_size` | 1024 | Tokens per progressive chunk |
-| `max_chunks_per_doc` | 16 | Progressive chunks per document |
-| `mlp_hidden_dim` | 8192 | MLP internal width (matches target hidden dim) |
-| `mlp_num_layers` | 4 | Residual MLP depth |
-| `batch_size` | 256 | Training batch size (more = more InfoNCE negatives) |
-| `num_epochs` | 50 | Max training epochs |
-| `early_stop_patience` | 7 | Epochs without improvement before stopping |
-| `lambda_mse` | 0.5 | MSE weight relative to InfoNCE |
-| `infonce_temperature` | 0.05 | Contrastive loss temperature |
+| Parameter               | Default | Description                                         |
+| ----------------------- | ------- | --------------------------------------------------- |
+| `target_layer`        | 30      | DeepSeek layer to extract from and inject into      |
+| `chunk_size`          | 1024    | Tokens per progressive chunk                        |
+| `max_chunks_per_doc`  | 16      | Progressive chunks per document                     |
+| `mlp_hidden_dim`      | 8192    | MLP internal width (matches target hidden dim)      |
+| `mlp_num_layers`      | 4       | Residual MLP depth                                  |
+| `batch_size`          | 256     | Training batch size (more = more InfoNCE negatives) |
+| `num_epochs`          | 50      | Max training epochs                                 |
+| `early_stop_patience` | 7       | Epochs without improvement before stopping          |
+| `lambda_mse`          | 0.5     | MSE weight relative to InfoNCE                      |
+| `infonce_temperature` | 0.05    | Contrastive loss temperature                        |
 
 ---
 
@@ -270,5 +269,6 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 ./run_pipeline.sh
 ```
 
 The layout within those 4 logical GPUs is always:
+
 - `cuda:0`, `cuda:1`, `cuda:2` → DeepSeek-70B shards
 - `cuda:3` → Qwen-7B inference + MLP training
