@@ -65,14 +65,25 @@ STITCHER_CKPT="${OUT_DIR}/stitcher_best.pt"
 
 mkdir -p "${TRAIN_HS_DIR}" "${VAL_HS_DIR}" "${OUT_DIR}"
 
+# ── Skip list ─────────────────────────────────────────────────────────────────
+# Usage: ./run_pipeline.sh --skip 0,1,2   (comma-separated phase numbers)
+SKIP=""
+if [[ "${1:-}" == "--skip" ]]; then
+    SKIP="${2:-}"
+    shift 2
+fi
+should_run() { echo "${SKIP}" | tr ',' '\n' | grep -qx "${1}" && return 1 || return 0; }
+
 echo "============================================================"
 echo " HF_HOME              : ${HF_HOME}"
 echo " CUDA_VISIBLE_DEVICES : ${CUDA_VISIBLE_DEVICES}"
 echo " Docs                 : ${DOCS_DIR}"
+echo " Skipping phases      : ${SKIP:-none}"
 echo "============================================================"
 
 # ── Phase 0: download dataset ────────────────────────────────────────────────
 echo ""
+if should_run 0; then
 echo "[Phase 0] Downloading documents …"
 EXISTING=$(find "${DOCS_DIR}" -name "*.txt" 2>/dev/null | wc -l)
 if [ "${EXISTING}" -ge "${NUM_DOCS}" ]; then
@@ -82,9 +93,11 @@ else
         --out-dir "${DOCS_DIR}" \
         --num-docs "${NUM_DOCS}"
 fi
+else echo "[Phase 0] Skipped"; fi
 
 # ── Phase 1: collect hidden states ───────────────────────────────────────────
 echo ""
+if should_run 1; then
 echo "[Phase 1] Collecting hidden states …"
 
 # Split raw docs 95/5 into train/val by filename.
@@ -112,16 +125,20 @@ python collect_hidden_states.py \
 python collect_hidden_states.py \
     --documents "${VAL_DOCS[@]}" \
     --out-dir "${VAL_HS_DIR}"
+else echo "[Phase 1] Skipped"; fi
 
 # ── Phase 2: SVD alignment ────────────────────────────────────────────────────
 echo ""
+if should_run 2; then
 echo "[Phase 2] Computing SVD alignment …"
 python svd_alignment.py \
     --data-dir "${TRAIN_HS_DIR}" \
     --out "${SVD_CKPT}"
+else echo "[Phase 2] Skipped"; fi
 
 # ── Phase 3: train residual MLP ───────────────────────────────────────────────
 echo ""
+if should_run 3; then
 echo "[Phase 3] Training residual MLP …"
 RESUME_ARG=""
 if [ -f "${STITCHER_CKPT}" ]; then
@@ -134,13 +151,16 @@ python train_mlp.py \
     --svd-ckpt "${SVD_CKPT}" \
     --out-dir "${OUT_DIR}" \
     ${RESUME_ARG}
+else echo "[Phase 3] Skipped"; fi
 
 # ── Phase 4: ablation validation ─────────────────────────────────────────────
 echo ""
+if should_run 4; then
 echo "[Phase 4] Running ablation validation …"
 python validate.py \
     --val-dir "${VAL_HS_DIR}" \
     --ckpt "${STITCHER_CKPT}"
+else echo "[Phase 4] Skipped"; fi
 
 echo ""
 echo "============================================================"
