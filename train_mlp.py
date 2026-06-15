@@ -80,7 +80,7 @@ def train(cfg: StitcherConfig, data_dir: str, svd_ckpt: str, out_dir: str):
     dtype = getattr(torch, cfg.dtype)
 
     # Load W_optimal
-    W_optimal = torch.load(svd_ckpt, map_location="cpu")
+    W_optimal = torch.load(svd_ckpt, map_location="cpu", weights_only=True)
 
     # Build model
     model = LatentStitcher(cfg, W_optimal).to(device).to(dtype)
@@ -159,7 +159,6 @@ def train(cfg: StitcherConfig, data_dir: str, svd_ckpt: str, out_dir: str):
                 "model_state": model.state_dict(),
                 "val_loss": val_loss,
                 "val_cos": val_cos,
-                "cfg": cfg,
             }, ckpt_path)
             print(f"  ↑ saved best checkpoint → {ckpt_path}")
 

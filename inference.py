@@ -161,7 +161,7 @@ def main():
     print("Loading Llama …")
     llama_tok, llama_model = load_target_model(cfg)
 
-    ckpt = torch.load(args.ckpt, map_location="cpu")
+    ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=True)
     W_optimal = ckpt["model_state"]["stage1.W"]
     dtype = getattr(torch, cfg.dtype)
     stitcher = LatentStitcher(cfg, W_optimal)
