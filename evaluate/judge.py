@@ -78,11 +78,11 @@ def main():
     print(f"Loading {JUDGE_MODEL} …")
     llm = LLM(
         model=JUDGE_MODEL,
-        dtype="float16",
-        quantization="awq",
-        max_model_len=4096,
+        dtype="bfloat16",
+        max_model_len=32768,
         gpu_memory_utilization=0.90,
-        tensor_parallel_size=2,
+        enforce_eager=False,
+        tensor_parallel_size=1,
     )
     params = SamplingParams(temperature=0.0, max_tokens=128)
 

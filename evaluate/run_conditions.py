@@ -148,13 +148,17 @@ def run_condition_c(qa_pairs: list) -> list:
     print(f"\nLoading {QWEN_72B_MODEL} for condition C …")
     llm = LLM(
         model=QWEN_72B_MODEL,
-        dtype="float16",
-        quantization="awq",
-        max_model_len=4096,
+        dtype="bfloat16",
+        max_model_len=32768,
         gpu_memory_utilization=0.90,
-        tensor_parallel_size=2,
+        enforce_eager=False,
+        tensor_parallel_size=1,
     )
-    params = SamplingParams(temperature=0.0, max_tokens=256)
+    params = SamplingParams(
+        temperature=0.0,
+        max_tokens=256,
+        stop=['\n\nQuestion:', '\n\nAnswer:'],
+    )
 
     prompts = [CONDITION_C_PROMPT.format(question=qa["question"]) for qa in qa_pairs]
     print(f"  Running condition C ({len(prompts)} prompts) …")

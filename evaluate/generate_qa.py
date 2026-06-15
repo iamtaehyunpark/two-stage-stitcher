@@ -61,11 +61,11 @@ def main():
     print(f"Loading {MODEL_ID} …")
     llm = LLM(
         model=MODEL_ID,
-        dtype="float16",
-        quantization="awq",
-        max_model_len=8192,
+        dtype="bfloat16",
+        max_model_len=32768,
         gpu_memory_utilization=0.90,
-        tensor_parallel_size=2,
+        enforce_eager=False,
+        tensor_parallel_size=1,
     )
     sampling_params = SamplingParams(temperature=0.3, max_tokens=1024)
 
