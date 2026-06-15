@@ -177,21 +177,34 @@ def main():
         qa_pairs = json.load(f)
     print(f"Loaded {len(qa_pairs)} QA pairs")
 
+    out_a = args.out.replace(".json", "_a.json")
+
     if args.skip_a:
-        if not os.path.exists(args.out):
+        # Try the partial checkpoint first, then fall back to full results file
+        src = out_a if os.path.exists(out_a) else args.out
+        if not os.path.exists(src):
             raise FileNotFoundError(
-                f"--skip-a requires existing results at {args.out} (run condition A first)"
+                f"--skip-a: no checkpoint found at {out_a} or {args.out}"
             )
-        with open(args.out) as f:
+        with open(src) as f:
             prev = json.load(f)
         answers_a = [r["answer_a"] for r in prev]
-        print(f"[A] Loaded {len(answers_a)} existing answers from {args.out}")
+        print(f"[A] Loaded {len(answers_a)} existing answers from {src}")
     else:
         answers_a = None
 
     answers_a, answers_b, answers_c = run_conditions_abc(
         qa_pairs, args.ckpt, skip_b=args.skip_b, answers_a=answers_a
     )
+
+    # Save A-only checkpoint immediately so --skip-a works on reruns
+    if not args.skip_a:
+        ckpt_a = [{"doc_name": qa["doc_name"], "question": qa["question"],
+                   "reference_answer": qa["reference_answer"], "answer_a": a}
+                  for qa, a in zip(qa_pairs, answers_a)]
+        with open(out_a, "w") as f:
+            json.dump(ckpt_a, f, indent=2)
+        print(f"Saved condition A checkpoint → {out_a}")
 
     results = []
     for qa, a, b, c in zip(qa_pairs, answers_a, answers_b, answers_c):
