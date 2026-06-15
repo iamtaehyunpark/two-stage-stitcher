@@ -78,7 +78,8 @@ def generate_answers(model, tokenizer, prompts: list, max_new_tokens: int = 256)
     return answers
 
 
-def run_conditions_abc(qa_pairs: list, ckpt_path: str, skip_b: bool = False, answers_a: list = None):
+def run_conditions_abc(qa_pairs: list, ckpt_path: str, skip_b: bool = False,
+                       answers_a: list = None, out_a: str = None):
     """
     Run all three conditions sharing a single DeepSeek-70B load.
 
@@ -108,6 +109,15 @@ def run_conditions_abc(qa_pairs: list, ckpt_path: str, skip_b: bool = False, ans
             print(f"  A [{i+1}/{len(prompts_a)}] …", end="\r")
             answers_a += generate_answers(llama_model, llama_tok, [prompt])
         print(f"\n  Done. {len(answers_a)} answers.")
+
+        # Persist A immediately — survives any later crash in B/C
+        if out_a:
+            ckpt_a = [{"doc_name": qa["doc_name"], "question": qa["question"],
+                       "reference_answer": qa["reference_answer"], "answer_a": a}
+                      for qa, a in zip(qa_pairs, answers_a)]
+            with open(out_a, "w") as f:
+                json.dump(ckpt_a, f, indent=2)
+            print(f"  Saved condition A checkpoint → {out_a}")
     else:
         print(f"\n[A] Skipped — using {len(answers_a)} preloaded answers.")
 
@@ -191,17 +201,8 @@ def main():
         answers_a = None
 
     answers_a, answers_b, answers_c = run_conditions_abc(
-        qa_pairs, args.ckpt, skip_b=args.skip_b, answers_a=answers_a
+        qa_pairs, args.ckpt, skip_b=args.skip_b, answers_a=answers_a, out_a=out_a
     )
-
-    # Save A-only checkpoint immediately so --skip-a works on reruns
-    if not args.skip_a:
-        ckpt_a = [{"doc_name": qa["doc_name"], "question": qa["question"],
-                   "reference_answer": qa["reference_answer"], "answer_a": a}
-                  for qa, a in zip(qa_pairs, answers_a)]
-        with open(out_a, "w") as f:
-            json.dump(ckpt_a, f, indent=2)
-        print(f"Saved condition A checkpoint → {out_a}")
 
     results = []
     for qa, a, b, c in zip(qa_pairs, answers_a, answers_b, answers_c):
