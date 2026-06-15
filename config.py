@@ -35,8 +35,9 @@ class StitcherConfig:
     num_epochs: int = 50             # up from 10
     warmup_steps: int = 2000         # up from 500
     grad_clip: float = 1.0
-    lambda_mse: float = 0.5          # up from 0.1 — stronger MSE anchor
-    infonce_temperature: float = 0.05  # down from 0.07 — sharper contrastive boundary
+    lambda_mse: float = 0.5
+    lambda_cos: float = 2.0          # direct cosine alignment term
+    infonce_temperature: float = 0.05
 
     # Training — early stopping
     early_stop_patience: int = 7     # stop if val_loss doesn't improve for this many epochs

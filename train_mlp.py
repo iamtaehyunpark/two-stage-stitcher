@@ -63,13 +63,24 @@ def infonce_loss(x: torch.Tensor, y: torch.Tensor, temperature: float) -> torch.
     return (loss_x + loss_y) / 2
 
 
+def cosine_loss(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    return 1.0 - F.cosine_similarity(
+        F.normalize(x, dim=-1), F.normalize(y, dim=-1)
+    ).mean()
+
+
 def combined_loss(
     x_final: torch.Tensor,
     y: torch.Tensor,
     temperature: float,
     lambda_mse: float,
+    lambda_cos: float,
 ) -> torch.Tensor:
-    return infonce_loss(x_final, y, temperature) + lambda_mse * F.mse_loss(x_final, y)
+    return (
+        infonce_loss(x_final, y, temperature)
+        + lambda_mse * F.mse_loss(x_final, y)
+        + lambda_cos * cosine_loss(x_final, y)
+    )
 
 
 # ── Training loop ─────────────────────────────────────────────────────────────
@@ -133,7 +144,7 @@ def train(cfg: StitcherConfig, data_dir: str, svd_ckpt: str, out_dir: str,
             Y_batch = Y_batch.to(device, dtype=dtype)
 
             x_final = model(X_batch)
-            loss = combined_loss(x_final, Y_batch, cfg.infonce_temperature, cfg.lambda_mse)
+            loss = combined_loss(x_final, Y_batch, cfg.infonce_temperature, cfg.lambda_mse, cfg.lambda_cos)
 
             optimizer.zero_grad()
             loss.backward()
@@ -154,7 +165,7 @@ def train(cfg: StitcherConfig, data_dir: str, svd_ckpt: str, out_dir: str,
                 Y_batch = Y_batch.to(device, dtype=dtype)
                 x_final = model(X_batch)
                 val_loss += combined_loss(x_final, Y_batch,
-                                          cfg.infonce_temperature, cfg.lambda_mse).item()
+                                          cfg.infonce_temperature, cfg.lambda_mse, cfg.lambda_cos).item()
                 val_cos += F.cosine_similarity(
                     F.normalize(x_final, dim=-1),
                     F.normalize(Y_batch, dim=-1),
