@@ -108,6 +108,7 @@ def train(cfg: StitcherConfig, data_dir: str, svd_ckpt: str, out_dir: str):
                              milestones=[cfg.warmup_steps])
 
     best_val_loss = float("inf")
+    epochs_no_improve = 0
 
     for epoch in range(1, cfg.num_epochs + 1):
         # ── train ──
@@ -148,11 +149,10 @@ def train(cfg: StitcherConfig, data_dir: str, svd_ckpt: str, out_dir: str):
         val_loss /= len(val_loader)
         val_cos  /= len(val_loader)
 
-        print(f"Epoch {epoch:3d}  train_loss={train_loss:.4f}  "
-              f"val_loss={val_loss:.4f}  val_cos={val_cos:.4f}")
-
-        if val_loss < best_val_loss:
+        improved = val_loss < best_val_loss - cfg.early_stop_min_delta
+        if improved:
             best_val_loss = val_loss
+            epochs_no_improve = 0
             ckpt_path = os.path.join(out_dir, "stitcher_best.pt")
             torch.save({
                 "epoch": epoch,
@@ -160,7 +160,18 @@ def train(cfg: StitcherConfig, data_dir: str, svd_ckpt: str, out_dir: str):
                 "val_loss": val_loss,
                 "val_cos": val_cos,
             }, ckpt_path)
-            print(f"  ↑ saved best checkpoint → {ckpt_path}")
+            marker = "  ↑ saved"
+        else:
+            epochs_no_improve += 1
+            marker = f"  (no improve {epochs_no_improve}/{cfg.early_stop_patience})"
+
+        print(f"Epoch {epoch:3d}  train_loss={train_loss:.4f}  "
+              f"val_loss={val_loss:.4f}  val_cos={val_cos:.4f}{marker}")
+
+        if epochs_no_improve >= cfg.early_stop_patience:
+            print(f"\nEarly stopping at epoch {epoch} "
+                  f"(no improvement for {cfg.early_stop_patience} epochs).")
+            break
 
     print(f"\nTraining complete. Best val_loss={best_val_loss:.4f}")
 

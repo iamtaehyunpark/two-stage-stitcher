@@ -38,6 +38,10 @@ class StitcherConfig:
     lambda_mse: float = 0.5          # up from 0.1 — stronger MSE anchor
     infonce_temperature: float = 0.05  # down from 0.07 — sharper contrastive boundary
 
+    # Training — early stopping
+    early_stop_patience: int = 7     # stop if val_loss doesn't improve for this many epochs
+    early_stop_min_delta: float = 1e-4  # minimum improvement to count as progress
+
     # Validation
     top_k_retrieval: int = 1
 
