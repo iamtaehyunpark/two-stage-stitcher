@@ -3,10 +3,10 @@ Step 2: Run all three conditions and collect answers.
 
   Condition A — Full prefill  : document + question → DeepSeek-70B (transformers)
   Condition B — Stitcher      : Qwen-7B → stitcher → inject into DeepSeek-70B
-  Condition C — No context    : question only → Qwen-72B-AWQ (vLLM)
+  Condition C — No context    : question only → DeepSeek-70B (same model, no doc)
 
-A and B share the same DeepSeek-70B model loaded via transformers.
-C uses Qwen-72B-AWQ via vLLM as a separate process.
+All three conditions use the same DeepSeek-70B model loaded once via transformers.
+This is a pure ablation: A tests full context, B tests the stitcher, C is the floor.
 
 Usage:
     python evaluate/run_conditions.py \
@@ -22,8 +22,6 @@ import argparse
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-
-QWEN_72B_MODEL = "Qwen/Qwen2.5-72B-Instruct-AWQ"
 
 CONDITION_A_PROMPT = """\
 You are a helpful assistant. Answer the question based on the document below.
@@ -41,21 +39,14 @@ Question: {question}
 Answer:"""
 
 
-def run_condition_a(qa_pairs: list) -> list:
-    """
-    Condition A: standard full-prefill generation with DeepSeek-70B.
-    Uses the same model and layer setup as the stitcher target, so the
-    comparison is apples-to-apples.
-    """
+def load_deepseek(cfg):
+    """Load DeepSeek-70B once; shared by conditions A, B, and C."""
     import torch
     from transformers import AutoTokenizer, AutoModelForCausalLM
-    from config import StitcherConfig
 
-    cfg = StitcherConfig()
     dtype = getattr(torch, cfg.dtype)
     max_memory = {i: "70GiB" for i in cfg.llama_devices}
-
-    print(f"\nLoading {cfg.target_model} for condition A …")
+    print(f"Loading {cfg.target_model} …")
     tokenizer = AutoTokenizer.from_pretrained(cfg.target_model)
     model = AutoModelForCausalLM.from_pretrained(
         cfg.target_model,
@@ -64,106 +55,107 @@ def run_condition_a(qa_pairs: list) -> list:
         max_memory=max_memory,
     )
     model.eval()
-    first_device = next(model.parameters()).device
+    return tokenizer, model
 
-    answers_a = []
-    for i, qa in enumerate(qa_pairs):
-        print(f"  Condition A [{i+1}/{len(qa_pairs)}] …", end="\r")
-        prompt = CONDITION_A_PROMPT.format(
-            document=qa["document"][:6000],
-            question=qa["question"],
-        )
+
+def generate_answers(model, tokenizer, prompts: list, max_new_tokens: int = 256) -> list:
+    import torch
+
+    first_device = next(model.parameters()).device
+    answers = []
+    for prompt in prompts:
         inputs = tokenizer(prompt, return_tensors="pt",
                            truncation=True, max_length=8192).to(first_device)
         with torch.no_grad():
             out = model.generate(
                 **inputs,
-                max_new_tokens=256,
+                max_new_tokens=max_new_tokens,
                 do_sample=False,
                 pad_token_id=tokenizer.eos_token_id,
             )
         generated = out[0][inputs["input_ids"].shape[-1]:]
-        answers_a.append(tokenizer.decode(generated, skip_special_tokens=True).strip())
-
-    print(f"\n  Done. {len(answers_a)} answers collected.")
-    return answers_a
+        answers.append(tokenizer.decode(generated, skip_special_tokens=True).strip())
+    return answers
 
 
-def run_condition_b(qa_pairs: list, ckpt_path: str) -> list:
-    """Condition B: stitcher injection into DeepSeek-70B."""
+def run_conditions_abc(qa_pairs: list, ckpt_path: str, skip_b: bool = False):
+    """
+    Run all three conditions sharing a single DeepSeek-70B load.
+
+    A — full document prefill
+    B — stitcher injection (Qwen-7B → MLP → inject at layer 30)
+    C — question only, no context (lower bound)
+    """
     import torch
     from config import StitcherConfig
-    from stitcher_model import LatentStitcher
     from collect_hidden_states import load_source_model, load_target_model, extract_qwen_hidden
     from inference import llama_embed_and_early_layers, llama_late_layers_and_generate
 
     cfg = StitcherConfig()
     dtype = getattr(torch, cfg.dtype)
 
-    print("\nLoading stitcher checkpoint …")
-    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
-    W_optimal = ckpt["model_state"]["stage1.W"]
-    stitcher = LatentStitcher(cfg, W_optimal).to(cfg.source_device).to(dtype)
-    stitcher.load_state_dict(ckpt["model_state"])
-    stitcher.eval()
+    llama_tok, llama_model = load_deepseek(cfg)
+    first_device = next(llama_model.parameters()).device
 
-    print("Loading Qwen-7B …")
-    qwen_tok, qwen_model = load_source_model(cfg)
+    # ── Condition A ──────────────────────────────────────────────────────────
+    print("\n[A] Full prefill …")
+    prompts_a = [
+        CONDITION_A_PROMPT.format(document=qa["document"][:6000], question=qa["question"])
+        for qa in qa_pairs
+    ]
+    answers_a = []
+    for i, prompt in enumerate(prompts_a):
+        print(f"  A [{i+1}/{len(prompts_a)}] …", end="\r")
+        answers_a += generate_answers(llama_model, llama_tok, [prompt])
+    print(f"\n  Done. {len(answers_a)} answers.")
 
-    print("Loading DeepSeek-70B …")
-    llama_tok, llama_model = load_target_model(cfg)
-    llama_device = next(llama_model.parameters()).device
+    # ── Condition B ──────────────────────────────────────────────────────────
+    if skip_b:
+        answers_b = ["[skipped]"] * len(qa_pairs)
+    else:
+        print("\n[B] Stitcher injection …")
+        from stitcher_model import LatentStitcher
+        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        W_optimal = ckpt["model_state"]["stage1.W"]
+        stitcher = LatentStitcher(cfg, W_optimal).to(cfg.source_device).to(dtype)
+        stitcher.load_state_dict(ckpt["model_state"])
+        stitcher.eval()
 
-    answers_b = []
-    for i, qa in enumerate(qa_pairs):
-        print(f"  Condition B [{i+1}/{len(qa_pairs)}] …", end="\r")
+        qwen_tok, qwen_model = load_source_model(cfg)
+        llama_device = next(llama_model.parameters()).device
 
-        x_qwen = extract_qwen_hidden(
-            qwen_model, qwen_tok, qa["document"][:6000], cfg.source_device
-        )
-        x_qwen = x_qwen.unsqueeze(0).to(cfg.source_device, dtype=dtype)
+        answers_b = []
+        for i, qa in enumerate(qa_pairs):
+            print(f"  B [{i+1}/{len(qa_pairs)}] …", end="\r")
+            x_qwen = extract_qwen_hidden(
+                qwen_model, qwen_tok, qa["document"][:6000], cfg.source_device
+            )
+            x_qwen = x_qwen.unsqueeze(0).to(cfg.source_device, dtype=dtype)
+            with torch.no_grad():
+                x_final = stitcher(x_qwen).to(llama_device)
+            query_ids = llama_tok(qa["question"], return_tensors="pt").input_ids.to(llama_device)
+            query_hidden = llama_embed_and_early_layers(llama_model, query_ids, cfg.target_layer)
+            prefix = x_final.unsqueeze(1)
+            combined = torch.cat([prefix, query_hidden], dim=1)
+            answer = llama_late_layers_and_generate(
+                llama_model, llama_tok, combined, cfg.target_layer, max_new_tokens=256
+            )
+            answers_b.append(answer)
+        print(f"\n  Done. {len(answers_b)} answers.")
 
-        with torch.no_grad():
-            x_final = stitcher(x_qwen).to(llama_device)
+    # ── Condition C ──────────────────────────────────────────────────────────
+    print("\n[C] No context (question only) …")
+    prompts_c = [
+        CONDITION_C_PROMPT.format(question=qa["question"])
+        for qa in qa_pairs
+    ]
+    answers_c = []
+    for i, prompt in enumerate(prompts_c):
+        print(f"  C [{i+1}/{len(prompts_c)}] …", end="\r")
+        answers_c += generate_answers(llama_model, llama_tok, [prompt])
+    print(f"\n  Done. {len(answers_c)} answers.")
 
-        query_ids = llama_tok(qa["question"], return_tensors="pt").input_ids.to(llama_device)
-        query_hidden = llama_embed_and_early_layers(llama_model, query_ids, cfg.target_layer)
-
-        prefix = x_final.unsqueeze(1)
-        combined = torch.cat([prefix, query_hidden], dim=1)
-
-        answer = llama_late_layers_and_generate(
-            llama_model, llama_tok, combined, cfg.target_layer, max_new_tokens=256
-        )
-        answers_b.append(answer)
-
-    print(f"\n  Done. {len(answers_b)} answers collected.")
-    return answers_b
-
-
-def run_condition_c(qa_pairs: list) -> list:
-    """Condition C: no context, Qwen-72B-AWQ via vLLM."""
-    from vllm import LLM, SamplingParams
-
-    print(f"\nLoading {QWEN_72B_MODEL} for condition C …")
-    llm = LLM(
-        model=QWEN_72B_MODEL,
-        dtype="bfloat16",
-        max_model_len=32768,
-        gpu_memory_utilization=0.90,
-        enforce_eager=False,
-        tensor_parallel_size=1,
-    )
-    params = SamplingParams(
-        temperature=0.0,
-        max_tokens=256,
-        stop=['\n\nQuestion:', '\n\nAnswer:'],
-    )
-
-    prompts = [CONDITION_C_PROMPT.format(question=qa["question"]) for qa in qa_pairs]
-    print(f"  Running condition C ({len(prompts)} prompts) …")
-    outputs = llm.generate(prompts, params)
-    return [o.outputs[0].text.strip() for o in outputs]
+    return answers_a, answers_b, answers_c
 
 
 def main():
@@ -181,16 +173,9 @@ def main():
         qa_pairs = json.load(f)
     print(f"Loaded {len(qa_pairs)} QA pairs")
 
-    # A and B both use DeepSeek-70B — run together to load the model once
-    answers_a = run_condition_a(qa_pairs)
-
-    if args.skip_b:
-        answers_b = ["[skipped]"] * len(qa_pairs)
-    else:
-        answers_b = run_condition_b(qa_pairs, args.ckpt)
-
-    # C uses a different model — separate session
-    answers_c = run_condition_c(qa_pairs)
+    answers_a, answers_b, answers_c = run_conditions_abc(
+        qa_pairs, args.ckpt, skip_b=args.skip_b
+    )
 
     results = []
     for qa, a, b, c in zip(qa_pairs, answers_a, answers_b, answers_c):
@@ -200,7 +185,7 @@ def main():
             "reference_answer": qa["reference_answer"],
             "answer_a":         a,   # DeepSeek-70B full prefill  (gold)
             "answer_b":         b,   # DeepSeek-70B via stitcher
-            "answer_c":         c,   # Qwen-72B no context        (lower bound)
+            "answer_c":         c,   # DeepSeek-70B no context    (lower bound)
         })
 
     with open(args.out, "w") as f:
