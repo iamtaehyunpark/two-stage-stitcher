@@ -78,7 +78,7 @@ def generate_answers(model, tokenizer, prompts: list, max_new_tokens: int = 256)
     return answers
 
 
-def run_conditions_abc(qa_pairs: list, ckpt_path: str, skip_b: bool = False):
+def run_conditions_abc(qa_pairs: list, ckpt_path: str, skip_b: bool = False, answers_a: list = None):
     """
     Run all three conditions sharing a single DeepSeek-70B load.
 
@@ -95,19 +95,21 @@ def run_conditions_abc(qa_pairs: list, ckpt_path: str, skip_b: bool = False):
     dtype = getattr(torch, cfg.dtype)
 
     llama_tok, llama_model = load_deepseek(cfg)
-    first_device = next(llama_model.parameters()).device
 
     # ── Condition A ──────────────────────────────────────────────────────────
-    print("\n[A] Full prefill …")
-    prompts_a = [
-        CONDITION_A_PROMPT.format(document=qa["document"][:6000], question=qa["question"])
-        for qa in qa_pairs
-    ]
-    answers_a = []
-    for i, prompt in enumerate(prompts_a):
-        print(f"  A [{i+1}/{len(prompts_a)}] …", end="\r")
-        answers_a += generate_answers(llama_model, llama_tok, [prompt])
-    print(f"\n  Done. {len(answers_a)} answers.")
+    if answers_a is None:
+        print("\n[A] Full prefill …")
+        prompts_a = [
+            CONDITION_A_PROMPT.format(document=qa["document"][:6000], question=qa["question"])
+            for qa in qa_pairs
+        ]
+        answers_a = []
+        for i, prompt in enumerate(prompts_a):
+            print(f"  A [{i+1}/{len(prompts_a)}] …", end="\r")
+            answers_a += generate_answers(llama_model, llama_tok, [prompt])
+        print(f"\n  Done. {len(answers_a)} answers.")
+    else:
+        print(f"\n[A] Skipped — using {len(answers_a)} preloaded answers.")
 
     # ── Condition B ──────────────────────────────────────────────────────────
     if skip_b:
@@ -163,6 +165,8 @@ def main():
     parser.add_argument("--qa",      default="evaluate/data/qa_pairs.json")
     parser.add_argument("--ckpt",    default="checkpoints/stitcher_best.pt")
     parser.add_argument("--out",     default="evaluate/data/condition_results.json")
+    parser.add_argument("--skip-a",  action="store_true",
+                        help="Load existing answers_a from --out instead of rerunning condition A")
     parser.add_argument("--skip-b",  action="store_true",
                         help="Skip condition B (stitcher) for a quick A/C baseline run")
     args = parser.parse_args()
@@ -173,8 +177,20 @@ def main():
         qa_pairs = json.load(f)
     print(f"Loaded {len(qa_pairs)} QA pairs")
 
+    if args.skip_a:
+        if not os.path.exists(args.out):
+            raise FileNotFoundError(
+                f"--skip-a requires existing results at {args.out} (run condition A first)"
+            )
+        with open(args.out) as f:
+            prev = json.load(f)
+        answers_a = [r["answer_a"] for r in prev]
+        print(f"[A] Loaded {len(answers_a)} existing answers from {args.out}")
+    else:
+        answers_a = None
+
     answers_a, answers_b, answers_c = run_conditions_abc(
-        qa_pairs, args.ckpt, skip_b=args.skip_b
+        qa_pairs, args.ckpt, skip_b=args.skip_b, answers_a=answers_a
     )
 
     results = []
