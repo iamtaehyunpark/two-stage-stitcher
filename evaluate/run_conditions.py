@@ -103,14 +103,10 @@ def run_conditions_abc(qa_pairs: list, ckpt_path: str, skip_b: bool = False,
     cfg = StitcherConfig()
     dtype = getattr(torch, cfg.dtype)
 
-    # If B is skipped, DeepSeek can use all 4 GPUs (faster A/C prefill).
-    # If B runs, keep GPU 3 free for Qwen + the stitcher.
-    if skip_b:
-        n_gpus = torch.cuda.device_count()
-        deepseek_devices = tuple(range(n_gpus))
-    else:
-        deepseek_devices = cfg.llama_devices
-    llama_tok, llama_model = load_deepseek(cfg, devices=deepseek_devices)
+    # Keep DeepSeek on the same shards (0-2) for A, B, and C so all three
+    # conditions run on an identical model placement — fair comparison.
+    # GPU 3 stays free for Qwen + the stitcher in condition B.
+    llama_tok, llama_model = load_deepseek(cfg)
 
     # ── Condition A ──────────────────────────────────────────────────────────
     if answers_a is None:
