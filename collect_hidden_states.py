@@ -52,46 +52,34 @@ def load_target_model(cfg: StitcherConfig):
 
 
 @torch.inference_mode()
-def extract_qwen_hidden_batch(
+def extract_qwen_hidden(
     model,
     tokenizer,
-    texts: List[str],
+    text: str,
     device: str,
 ) -> Tensor:
-    """
-    Batch forward pass through Qwen. Returns last-token hidden states, shape (N, src_dim).
-    Chunks are padded to the longest sequence in the batch.
-    """
-    inputs = tokenizer(texts, return_tensors="pt", truncation=True,
-                       max_length=131072, padding=True)
+    """Returns last-token hidden state from Qwen's final layer. Shape: (src_dim,)."""
+    inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=131072)
     inputs = {k: v.to(device) for k, v in inputs.items()}
     out = model(**inputs)
-    last_layer_hs = out.hidden_states[-1]           # (N, seq_len, src_dim)
-    # Last non-padding token per sequence
-    seq_lens = inputs["attention_mask"].sum(dim=1) - 1   # (N,)
-    last_tokens = last_layer_hs[torch.arange(len(texts)), seq_lens]  # (N, src_dim)
-    return last_tokens.float().cpu()
+    last_layer_hs = out.hidden_states[-1]       # (1, seq_len, src_dim)
+    return last_layer_hs[0, -1, :].float().cpu()
 
 
 @torch.inference_mode()
-def extract_llama_hidden_batch(
+def extract_llama_hidden(
     model,
     tokenizer,
-    texts: List[str],
+    text: str,
     target_layer: int,
 ) -> Tensor:
-    """
-    Batch forward pass through Llama. Returns hidden states at target_layer, shape (N, tgt_dim).
-    """
+    """Returns last-token hidden state from Llama at `target_layer`. Shape: (tgt_dim,)."""
     first_device = next(model.parameters()).device
-    inputs = tokenizer(texts, return_tensors="pt", truncation=True,
-                       max_length=8192, padding=True)
+    inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=8192)
     inputs = {k: v.to(first_device) for k, v in inputs.items()}
     out = model(**inputs)
-    hs_at_layer = out.hidden_states[target_layer + 1]    # (N, seq_len, tgt_dim)
-    seq_lens = inputs["attention_mask"].sum(dim=1) - 1   # (N,)
-    last_tokens = hs_at_layer[torch.arange(len(texts)), seq_lens]    # (N, tgt_dim)
-    return last_tokens.float().cpu()
+    hs_at_layer = out.hidden_states[target_layer + 1]   # (1, seq_len, tgt_dim)
+    return hs_at_layer[0, -1, :].float().cpu()
 
 
 def progressive_chunks(tokens: List[int], chunk_size: int, max_chunks: int) -> List[List[int]]:
@@ -119,12 +107,17 @@ def process_document(
     token_ids = qwen_tok.encode(doc_text)
     windows = progressive_chunks(token_ids, cfg.chunk_size, cfg.max_chunks_per_doc)
 
-    texts = [qwen_tok.decode(ids, skip_special_tokens=True) for ids in windows]
+    X, Y = [], []
+    for window_ids in windows:
+        chunk_text = qwen_tok.decode(window_ids, skip_special_tokens=True)
 
-    X = extract_qwen_hidden_batch(qwen_model, qwen_tok, texts, cfg.source_device)
-    Y = extract_llama_hidden_batch(llama_model, llama_tok, texts, cfg.target_layer)
+        x = extract_qwen_hidden(qwen_model, qwen_tok, chunk_text, cfg.source_device)
+        y = extract_llama_hidden(llama_model, llama_tok, chunk_text, cfg.target_layer)
 
-    return X.numpy(), Y.numpy()
+        X.append(x.numpy())
+        Y.append(y.numpy())
+
+    return np.stack(X), np.stack(Y)
 
 
 def main():
