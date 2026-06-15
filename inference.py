@@ -28,6 +28,11 @@ from collect_hidden_states import extract_qwen_hidden, load_source_model
 
 # ── Llama split-forward helpers ───────────────────────────────────────────────
 
+def _rope(model, hidden, position_ids):
+    """Compute RoPE (cos, sin) — compatible with transformers >= 4.40."""
+    return model.model.rotary_emb(hidden, position_ids)
+
+
 def llama_embed_and_early_layers(model, input_ids, target_layer: int):
     """
     Run Llama embedding + layers 0…target_layer-1.
@@ -35,6 +40,7 @@ def llama_embed_and_early_layers(model, input_ids, target_layer: int):
     """
     hidden = model.model.embed_tokens(input_ids)
     position_ids = torch.arange(input_ids.shape[-1], device=input_ids.device).unsqueeze(0)
+    position_embeddings = _rope(model, hidden, position_ids)
 
     for i, layer in enumerate(model.model.layers):
         if i >= target_layer:
@@ -46,6 +52,7 @@ def llama_embed_and_early_layers(model, input_ids, target_layer: int):
             past_key_value=None,
             output_attentions=False,
             use_cache=False,
+            position_embeddings=position_embeddings,
         )
         hidden = layer_out[0]
 
@@ -66,6 +73,7 @@ def llama_late_layers_and_generate(
     """
     seq_len = hidden.shape[1]
     position_ids = torch.arange(seq_len, device=hidden.device).unsqueeze(0)
+    position_embeddings = _rope(model, hidden, position_ids)
 
     for i in range(target_layer, len(model.model.layers)):
         layer_out = model.model.layers[i](
@@ -75,11 +83,11 @@ def llama_late_layers_and_generate(
             past_key_value=None,
             output_attentions=False,
             use_cache=False,
+            position_embeddings=position_embeddings,
         )
         hidden = layer_out[0]
 
     hidden = model.model.norm(hidden)
-    # Take last token logits for greedy decode
     logits = model.lm_head(hidden)     # (1, seq_len, vocab)
 
     generated = []
@@ -87,11 +95,13 @@ def llama_late_layers_and_generate(
     generated.append(next_token.item())
 
     for _ in range(max_new_tokens - 1):
-        embed = model.model.embed_tokens(next_token.unsqueeze(0))   # (1,1,D)
+        embed = model.model.embed_tokens(next_token.unsqueeze(0))   # (1, 1, D)
         pos = torch.tensor([[seq_len + len(generated) - 1]], device=hidden.device)
+        pe = _rope(model, embed, pos)
         for layer in model.model.layers[target_layer:]:
             out = layer(embed, attention_mask=None, position_ids=pos,
-                        past_key_value=None, output_attentions=False, use_cache=False)
+                        past_key_value=None, output_attentions=False, use_cache=False,
+                        position_embeddings=pe)
             embed = out[0]
         embed = model.model.norm(embed)
         logits = model.lm_head(embed)
