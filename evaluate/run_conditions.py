@@ -39,14 +39,22 @@ Question: {question}
 Answer:"""
 
 
-def load_deepseek(cfg):
-    """Load DeepSeek-70B once; shared by conditions A, B, and C."""
+def load_deepseek(cfg, devices=None):
+    """
+    Load DeepSeek-70B once; shared by conditions A, B, and C.
+
+    `devices` is the tuple of (logical) GPU indices to shard across.
+    When condition B is skipped, pass all 4 GPUs to speed up A/C prefill;
+    when B runs, leave GPU 3 free for Qwen + the stitcher (default).
+    """
     import torch
     from transformers import AutoTokenizer, AutoModelForCausalLM
 
+    if devices is None:
+        devices = cfg.llama_devices
     dtype = getattr(torch, cfg.dtype)
-    max_memory = {i: "70GiB" for i in cfg.llama_devices}
-    print(f"Loading {cfg.target_model} …")
+    max_memory = {i: "70GiB" for i in devices}
+    print(f"Loading {cfg.target_model} on GPUs {tuple(devices)} …")
     tokenizer = AutoTokenizer.from_pretrained(cfg.target_model)
     model = AutoModelForCausalLM.from_pretrained(
         cfg.target_model,
@@ -95,7 +103,14 @@ def run_conditions_abc(qa_pairs: list, ckpt_path: str, skip_b: bool = False,
     cfg = StitcherConfig()
     dtype = getattr(torch, cfg.dtype)
 
-    llama_tok, llama_model = load_deepseek(cfg)
+    # If B is skipped, DeepSeek can use all 4 GPUs (faster A/C prefill).
+    # If B runs, keep GPU 3 free for Qwen + the stitcher.
+    if skip_b:
+        n_gpus = torch.cuda.device_count()
+        deepseek_devices = tuple(range(n_gpus))
+    else:
+        deepseek_devices = cfg.llama_devices
+    llama_tok, llama_model = load_deepseek(cfg, devices=deepseek_devices)
 
     # ── Condition A ──────────────────────────────────────────────────────────
     if answers_a is None:
