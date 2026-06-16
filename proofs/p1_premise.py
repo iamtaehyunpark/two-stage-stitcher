@@ -40,6 +40,7 @@ def main():
     parser.add_argument("--out", default="proofs/data/p1.json")
     parser.add_argument("--max-new-tokens", type=int, default=512)
     parser.add_argument("--gpus", default="0,1,2,3")
+    parser.add_argument("--layer", type=int, help="target layer to inject (defaults to StitcherConfig.target_layer)")
     parser.add_argument("--reasoning", action="store_true",
                         help="let R1 emit <think> traces instead of suppressing them")
     args = parser.parse_args()
@@ -50,11 +51,13 @@ def main():
 
     from config import StitcherConfig
     cfg = StitcherConfig()
+    target_layer = args.layer if args.layer is not None else cfg.target_layer
     devices = tuple(int(x) for x in args.gpus.split(","))
     tok, model = load_deepseek(cfg, devices=devices)
 
     records = evaluate_synthetic(model, tok, cfg,
-                                 max_new_tokens=args.max_new_tokens, want_wrong=False)
+                                 max_new_tokens=args.max_new_tokens, want_wrong=False,
+                                 target_layer=target_layer)
     summary = verdict_p1(records)
 
     with open(args.out, "w") as f:

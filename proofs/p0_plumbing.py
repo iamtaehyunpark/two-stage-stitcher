@@ -101,6 +101,7 @@ def main():
     parser.add_argument("--out", default="proofs/data/p0.json")
     parser.add_argument("--max-new-tokens", type=int, default=512)
     parser.add_argument("--gpus", default="0,1,2,3", help="logical GPU indices for DeepSeek shards")
+    parser.add_argument("--layer", type=int, help="target layer to inject (defaults to StitcherConfig.target_layer)")
     parser.add_argument("--reasoning", action="store_true",
                         help="let R1 emit <think> traces instead of suppressing them")
     args = parser.parse_args()
@@ -111,6 +112,7 @@ def main():
 
     from config import StitcherConfig
     cfg = StitcherConfig()
+    target_layer = args.layer if args.layer is not None else cfg.target_layer
     devices = tuple(int(x) for x in args.gpus.split(","))
 
     if args.document:
@@ -124,15 +126,15 @@ def main():
     tok, model = load_deepseek(cfg, devices=devices)
 
     # Capture the document's true split-forward cache once; reuse for all questions.
-    print("Capturing true layer-%d states …" % cfg.target_layer)
-    doc_cache, n_doc = capture_document(model, tok, document, cfg.target_layer)
+    print("Capturing true layer-%d states …" % target_layer)
+    doc_cache, n_doc = capture_document(model, tok, document, target_layer)
     print(f"  document = {n_doc} tokens")
 
     records = []
     for item in qa:
         q, gold = item["q"], item["a"]
         ans_a = full_prefill_answer(model, tok, document, q, args.max_new_tokens)
-        ans_sf = inject_answer(model, tok, doc_cache, n_doc, q, cfg.target_layer,
+        ans_sf = inject_answer(model, tok, doc_cache, n_doc, q, target_layer,
                                args.max_new_tokens)
 
         a_ok = correct(ans_a, gold)

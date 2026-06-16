@@ -35,24 +35,28 @@ CAUSAL_MARGIN = 0.30   # matched must beat wrong-doc by this for causation to ho
 MIN_GATED = 5        # minimum gated items for the result to mean anything
 
 
-def capture_all(model, tokenizer, cfg, docs=None):
+def capture_all(model, tokenizer, cfg, target_layer=None, docs=None):
     """Capture each document's true split-forward cache once. Returns
     name -> (doc_cache, n_doc)."""
     docs = docs or SYNTHETIC_DOCS
+    if target_layer is None:
+        target_layer = cfg.target_layer
     caches = {}
     for d in docs:
-        print(f"  capturing {d['name']} …")
-        caches[d["name"]] = capture_document(model, tokenizer, d["text"], cfg.target_layer)
+        print(f"  capturing {d['name']} at layer {target_layer} …")
+        caches[d["name"]] = capture_document(model, tokenizer, d["text"], target_layer)
     return caches
 
 
 def evaluate_synthetic(model, tokenizer, cfg, docs=None, caches=None,
-                       max_new_tokens=256, want_wrong=True):
+                       max_new_tokens=256, want_wrong=True, c_a_cache=None, target_layer=None):
     """Run C / A / inject-matched / (inject-wrong) for every QA and return the
     record table."""
     docs = docs or SYNTHETIC_DOCS
+    if target_layer is None:
+        target_layer = cfg.target_layer
     if caches is None:
-        caches = capture_all(model, tokenizer, cfg, docs)
+        caches = capture_all(model, tokenizer, cfg, target_layer, docs)
     names = [d["name"] for d in docs]
 
     records = []
@@ -62,10 +66,18 @@ def evaluate_synthetic(model, tokenizer, cfg, docs=None, caches=None,
         w_cache, w_n = caches[wrong_name]
         for qa in doc["qa"]:
             q, gold = qa["q"], qa["a"]
-            ans_c = no_context_answer(model, tokenizer, q, max_new_tokens)
-            ans_a = full_prefill_answer(model, tokenizer, doc["text"], q, max_new_tokens)
+            cache_key = (doc["name"], q)
+            
+            if c_a_cache is not None and cache_key in c_a_cache:
+                ans_c, ans_a = c_a_cache[cache_key]
+            else:
+                ans_c = no_context_answer(model, tokenizer, q, max_new_tokens)
+                ans_a = full_prefill_answer(model, tokenizer, doc["text"], q, max_new_tokens)
+                if c_a_cache is not None:
+                    c_a_cache[cache_key] = (ans_c, ans_a)
+
             ans_inj = inject_answer(model, tokenizer, d_cache, d_n, q,
-                                    cfg.target_layer, max_new_tokens)
+                                    target_layer, max_new_tokens)
             rec = {
                 "doc": doc["name"], "wrong_doc": wrong_name,
                 "question": q, "gold": gold,
@@ -77,12 +89,12 @@ def evaluate_synthetic(model, tokenizer, cfg, docs=None, caches=None,
             if want_wrong:
                 # inject the WRONG document's states, ask THIS document's question.
                 ans_w = inject_answer(model, tokenizer, w_cache, w_n, q,
-                                      cfg.target_layer, max_new_tokens)
+                                      target_layer, max_new_tokens)
                 rec["wrong"] = ans_w
                 rec["wrong_correct"] = correct(ans_w, gold)
             records.append(rec)
             tail = f"  WRONG={rec.get('wrong_correct')}" if want_wrong else ""
-            print(f"[{doc['name']}] {q}\n   gold={gold!r}  C={rec['c_correct']}  "
+            print(f"[{doc['name']}] {q} (layer {target_layer})\n   gold={gold!r}  C={rec['c_correct']}  "
                   f"A={rec['a_correct']}  INJECT={rec['inject_correct']}{tail}")
     return records
 
