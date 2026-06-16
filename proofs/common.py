@@ -50,6 +50,20 @@ QUERY_PROMPT = (
     "present, say you do not know.\n\nQuestion: {question}\nAnswer:"
 )
 
+# DeepSeek-R1 is a reasoning model. For this factual-recall eval we suppress the
+# <think> trace (the standard R1 no-think trick: begin the assistant turn with an
+# already-closed, empty think block) so every condition emits one short, directly
+# scorable answer. This avoids two failure modes: a long trace truncating before
+# the answer, and a gold token (e.g. "five", "64") matching by chance inside the
+# reasoning and corrupting the C-fails gate. Set SUPPRESS_THINK=False (CLI
+# --reasoning) to let it reason instead.
+SUPPRESS_THINK = True
+THINK_SKIP = "<think>\n\n</think>\n\n"
+
+
+def _with_think_control(prompt: str) -> str:
+    return prompt + THINK_SKIP if SUPPRESS_THINK else prompt
+
 
 # ── scoring (substring match after light normalisation) ───────────────────────
 def normalize(s: str) -> str:
@@ -69,6 +83,7 @@ def _device(model):
 
 def generate_plain(model, tokenizer, prompt, max_new_tokens):
     import torch
+    prompt = _with_think_control(prompt)
     ids = tokenizer(prompt, return_tensors="pt", truncation=True,
                     max_length=8192).to(_device(model))
     with torch.no_grad():
@@ -104,7 +119,7 @@ def inject_answer(model, tokenizer, doc_cache, n_doc, question, target_layer,
     injected true layer-`target_layer` states (split-forward)."""
     text = split_forward_generate(
         model, tokenizer, doc_cache, n_doc,
-        query_text=QUERY_PROMPT.format(question=question),
+        query_text=_with_think_control(QUERY_PROMPT.format(question=question)),
         target_layer=target_layer, max_new_tokens=max_new_tokens,
     )
     return strip_think(text)

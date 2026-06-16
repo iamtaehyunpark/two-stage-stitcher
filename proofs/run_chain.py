@@ -80,8 +80,13 @@ def main():
                         help="logical GPU indices (no SLM in Proofs 0–2 → use all 4)")
     parser.add_argument("--force", action="store_true",
                         help="run Proofs 1–2 even if Proof 0 fails (debugging only)")
+    parser.add_argument("--reasoning", action="store_true",
+                        help="let R1 emit <think> traces instead of suppressing them")
     args = parser.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
+
+    import proofs.common as _common
+    _common.SUPPRESS_THINK = not args.reasoning
 
     from config import StitcherConfig
     cfg = StitcherConfig()

@@ -39,8 +39,13 @@ def main():
     parser.add_argument("--out", default="proofs/data/p2.json")
     parser.add_argument("--max-new-tokens", type=int, default=512)
     parser.add_argument("--gpus", default="0,1,2,3")
+    parser.add_argument("--reasoning", action="store_true",
+                        help="let R1 emit <think> traces instead of suppressing them")
     args = parser.parse_args()
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
+
+    import proofs.common as _common
+    _common.SUPPRESS_THINK = not args.reasoning
 
     from config import StitcherConfig
     cfg = StitcherConfig()
