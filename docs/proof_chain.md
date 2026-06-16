@@ -8,11 +8,16 @@ the project as cheaply as possible.
 This is deliberate: validate the *receiver* completely before building any *sender*.
 The SLM enters only at Proof 6.
 
+> **Result (2026-06-17):** Proofs 0–2 pass on synthetic facts, and a depth sweep
+> shows the assumed layer 30 is suboptimal — recall peaks shallow (≈1.0 at L12–14),
+> is mediocre at 30 (0.60), and dies past ~40. The new tension: recall is best where
+> compute savings are worst. Full write-up: [`layer_sweep.md`](layer_sweep.md).
+
 | # | Proof | Proves | Pass | Fail | Status |
 |---|---|---|---|---|---|
-| 0 | Split-forward plumbing | harness is correct | split-forward(true) ≈ A | plumbing bug; nothing below interpretable | pending |
-| 1 | Injection premise | injected states are read & reasoned over | inject-all-N succeeds where C fails | premise broken → **stop project** | pending (blocked by 0) |
-| 2 | Wrong-doc falsifier | it's injection, not memory | wrong-doc fails X | "success" was memory → **falsified** | pending (blocked by 1) |
+| 0 | Split-forward plumbing | harness is correct | split-forward(true) ≈ A | plumbing bug; nothing below interpretable | **PASS** (clean at every layer 12–64) |
+| 1 | Injection premise | injected states are read & reasoned over | inject-all-N succeeds where C fails | premise broken → **stop project** | **CONFIRMED** (layer-dependent; ≈1.0 at L12–14) |
+| 2 | Wrong-doc falsifier | it's injection, not memory | wrong-doc fails X | "success" was memory → **falsified** | **PASS** (wrong-doc 0.00 at L12/24/25) |
 | 3 | Path resolution | full prefix vs sparse needles | (see outcomes) | — | pending (blocked by 2) |
 | 4 | Length scaling | survives long context | recall holds at 16k/32k+ | dies at length → premise unproven | pending (blocked by 3) |
 | 5 | Latent beats text-RAG | reason to exist | latent ≥ text-RAG at lower cost | dead weight vs RAG | pending (blocked by 4) |
