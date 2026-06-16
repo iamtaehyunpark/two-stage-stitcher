@@ -59,9 +59,12 @@ DEFAULT_DOC = (
 # revision the model's prior disagrees with the text on — a confound for a test
 # whose whole point is that memory and document coincide.)
 DEFAULT_QA = [
-    {"q": "In which mountain range does Mount Everest lie?", "a": "Himalayas"},
+    # gold "Himalaya" matches both "Himalayas" and "Himalayan"; each question is
+    # self-contained (no cross-question coreference — every item is asked standalone
+    # with only the injected document, so a dangling "him" has no antecedent).
+    {"q": "In which mountain range does Mount Everest lie?", "a": "Himalaya"},
     {"q": "Who was the first to reach the summit of Mount Everest, in 1953?", "a": "Hillary"},
-    {"q": "Who accompanied him on that first ascent?", "a": "Tenzing Norgay"},
+    {"q": "Who accompanied Edmund Hillary on the first ascent of Mount Everest?", "a": "Tenzing Norgay"},
     {"q": "After whom was Mount Everest named?", "a": "George Everest"},
     {"q": "What is Mount Everest called in Tibetan?", "a": "Chomolungma"},
 ]
