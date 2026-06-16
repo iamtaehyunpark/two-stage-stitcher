@@ -76,6 +76,20 @@ def correct(answer: str, gold: str) -> bool:
     return normalize(gold) in normalize(answer)
 
 
+def final_answer(text: str) -> str:
+    """Extract the scorable answer, robust to both modes:
+      - reasoning closed:  '<think>…</think>ANSWER'  → 'ANSWER'
+      - reasoning truncated:'<think>…'  (never closed) → '' (no answer, not the
+        raw trace — so a stray gold token inside an unfinished think can't score)
+      - no-think:           'ANSWER'                  → 'ANSWER'
+    """
+    if "</think>" in text:
+        return text.split("</think>")[-1].strip()
+    if "<think>" in text:
+        return ""
+    return text.strip()
+
+
 # ── answer primitives ─────────────────────────────────────────────────────────
 def _device(model):
     return next(model.parameters()).device
@@ -90,7 +104,7 @@ def generate_plain(model, tokenizer, prompt, max_new_tokens):
         out = model.generate(**ids, max_new_tokens=max_new_tokens, do_sample=False,
                              pad_token_id=tokenizer.eos_token_id)
     text = tokenizer.decode(out[0][ids["input_ids"].shape[1]:], skip_special_tokens=True)
-    return strip_think(text)
+    return final_answer(text)
 
 
 def no_context_answer(model, tokenizer, question, max_new_tokens=256):
@@ -122,4 +136,4 @@ def inject_answer(model, tokenizer, doc_cache, n_doc, question, target_layer,
         query_text=_with_think_control(QUERY_PROMPT.format(question=question)),
         target_layer=target_layer, max_new_tokens=max_new_tokens,
     )
-    return strip_think(text)
+    return final_answer(text)

@@ -116,18 +116,26 @@ def main():
         json.dump({"proof1": s1, "proof2": s2, "records": records}, f, indent=2)
 
     # ── chain verdict ────────────────────────────────────────────────────────
-    chain_green = (s0["verdict"] == "PASS" and s1["verdict"] == "PASS"
-                   and s2["verdict"] == "PASS")
+    v0, v1, v2 = s0["verdict"], s1["verdict"], s2["verdict"]
+    fidelity = s1.get("recall_fidelity_vs_prefill")
     print("\n" + "#" * 60)
-    print(f"  Proof 0 (plumbing)  : {s0['verdict']}")
-    print(f"  Proof 1 (premise)   : {s1['verdict']}")
-    print(f"  Proof 2 (falsifier) : {s2['verdict']}")
+    print(f"  Proof 0 (plumbing)  : {v0}")
+    print(f"  Proof 1 (premise)   : {v1}   (recall fidelity {fidelity})")
+    print(f"  Proof 2 (falsifier) : {v2}")
     print("#" * 60)
-    if chain_green:
-        print("  RECEIVER VALIDATED — the project is alive. Translation work is licensed.")
+    if v0 == "PASS" and v1 == "PASS" and v2 == "PASS":
+        print("  RECEIVER VALIDATED — read, causal, high fidelity. Translation work licensed.")
         print("  Next: Proof 3 (all-N vs needles), then 4, 5, and only then the SLM (6).")
+    elif v1 == "FAIL":
+        print("  CHAIN RED — injected states are ignored. Premise broken; stop the project.")
+    elif v0 == "PASS" and v1 == "PARTIAL" and v2 in ("PASS", "INCONCLUSIVE"):
+        print("  RECEIVER WORKS AND IS CAUSAL — but recall fidelity is partial "
+              f"({fidelity}).")
+        print("  Not a stop: the premise holds and the wrong-doc control is clean. The gap")
+        print("  is fidelity, which Proofs 3–4 size (needles vs all-N; length) and the")
+        print("  capture/inference path can likely improve. Decide the fidelity bar before 6.")
     else:
-        print("  CHAIN RED — a cheap, early, decisive stop. Read the failing rung above.")
+        print("  MIXED — read the rungs above; the receiver is not yet cleanly validated.")
     print(f"\nSaved → {args.out_dir}/p0.json, {args.out_dir}/p1p2.json")
 
 

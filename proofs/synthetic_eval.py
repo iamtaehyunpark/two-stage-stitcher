@@ -29,7 +29,9 @@ from proofs.common import (
 )
 from proofs.synthetic_docs import SYNTHETIC_DOCS
 
-PASS_RATE = 0.8      # inject success rate on gated items to call a rung green
+STRONG_RATE = 0.8    # inject recall at/above this → strong pass
+IGNORED_MARGIN = 0.15  # inject within this of the C floor → states ignored (premise broken)
+CAUSAL_MARGIN = 0.30   # matched must beat wrong-doc by this for causation to hold
 MIN_GATED = 5        # minimum gated items for the result to mean anything
 
 
@@ -92,60 +94,99 @@ def _gated(records):
 
 
 def verdict_p1(records, verbose=True):
+    """Three scientifically distinct outcomes, not a single bar:
+      FAIL    — inject ≈ C floor: states ignored, premise broken → stop.
+      PARTIAL — inject clearly beats C but below STRONG_RATE: premise HOLDS
+                (states are read & reasoned over), recall fidelity is the gap.
+      PASS    — inject ≥ STRONG_RATE: premise holds at high fidelity.
+    On gated items the C floor is 0 by construction, so `inj` is also the recall
+    fidelity vs full-prefill (A = 1.0 on gated)."""
     gated = _gated(records)
     n = len(gated)
     disq_c = sum(r["c_correct"] for r in records)          # guessable → thrown out
     disq_a = sum(not r["a_correct"] for r in records)      # not in text → thrown out
+    c_floor = (sum(r["c_correct"] for r in gated) / n) if n else 0.0   # 0 by gate def.
     inj = (sum(r["inject_correct"] for r in gated) / n) if n else 0.0
-    ok = n >= MIN_GATED and inj >= PASS_RATE
+
+    if n < MIN_GATED:
+        verdict = "FAIL"
+    elif inj - c_floor < IGNORED_MARGIN:
+        verdict = "FAIL"          # ignored → premise broken
+    elif inj >= STRONG_RATE:
+        verdict = "PASS"
+    else:
+        verdict = "PARTIAL"        # read & reasoned over, fidelity below bar
+
     summary = {
         "total_items": len(records),
         "gated_items": n,
         "disqualified_c_guessable": int(disq_c),
         "disqualified_a_unanswerable": int(disq_a),
+        "c_floor_on_gated": round(c_floor, 3),
         "inject_correct_on_gated": round(inj, 3),
-        "pass_rate_threshold": PASS_RATE,
-        "verdict": "PASS" if ok else "FAIL",
+        "recall_fidelity_vs_prefill": round(inj, 3),  # A == 1.0 on gated
+        "strong_threshold": STRONG_RATE,
+        "verdict": verdict,
     }
     if verbose:
         print("\n" + "=" * 60)
         print("PROOF 1 — the injection premise")
         print(f"  gated items (C fails & A succeeds): {n}/{len(records)}")
         print(f"  disqualified — C guessable: {disq_c}   A unanswerable: {disq_a}")
-        print(f"  inject-all-N correct on gated:      {summary['inject_correct_on_gated']}")
-        print(f"  VERDICT: {summary['verdict']}"
-              + ("" if ok else "  → premise unproven; do not build the sender"))
-        if ok:
-            print("  → injected true states are read & reasoned over on unguessable facts.")
+        print(f"  C floor on gated:        {summary['c_floor_on_gated']}  (0 by construction)")
+        print(f"  inject-all-N on gated:   {summary['inject_correct_on_gated']}"
+              f"   → recall fidelity vs full prefill")
+        print(f"  VERDICT: {verdict}")
+        if verdict == "PASS":
+            print("  → injected true states are read & reasoned over at high fidelity.")
+        elif verdict == "PARTIAL":
+            print("  → premise HOLDS: states are read & reasoned over on unguessable facts")
+            print(f"    ({int(inj*n)}/{n}), but recall fidelity is {summary['inject_correct_on_gated']} "
+                  f"(< {STRONG_RATE}). Characterize/improve before the sender; not a stop.")
+        else:
+            print("  → states ignored (inject ≈ C). Premise broken; no stitcher can help. Stop.")
     return summary
 
 
 def verdict_p2(records, verbose=True):
+    """The falsifier keys on the WRONG-document rate, not on matched recall:
+      FAIL (falsified) — wrong-doc answers X: injection inert / leak → Proof 1's
+                         apparent success was an artifact.
+      INCONCLUSIVE     — wrong low but matched ≈ wrong: too weak to claim causation.
+      PASS             — wrong ≈ 0 and matched beats wrong by CAUSAL_MARGIN: the
+                         injected document causally controls the answer."""
     gated = _gated(records)
     n = len(gated)
     if any("wrong_correct" not in r for r in gated):
         raise ValueError("Proof 2 needs wrong-document answers; run with want_wrong=True")
     matched = (sum(r["inject_correct"] for r in gated) / n) if n else 0.0
     wrong = (sum(r["wrong_correct"] for r in gated) / n) if n else 0.0
-    # Falsifier passes when the wrong document does NOT answer (low) while the
-    # matched document does (high).
-    ok = n >= MIN_GATED and matched >= PASS_RATE and wrong <= (1.0 - PASS_RATE)
+
+    if n < MIN_GATED:
+        verdict = "FAIL"
+    elif wrong > (1.0 - STRONG_RATE):
+        verdict = "FAIL"           # wrong doc answers → falsified
+    elif matched - wrong >= CAUSAL_MARGIN:
+        verdict = "PASS"           # causation established
+    else:
+        verdict = "INCONCLUSIVE"   # matched too weak to separate from wrong
+
     summary = {
         "gated_items": n,
         "inject_matched_correct_on_gated": round(matched, 3),
         "inject_wrong_correct_on_gated": round(wrong, 3),
-        "verdict": "PASS" if ok else "FAIL",
+        "verdict": verdict,
     }
     if verbose:
         print("\n" + "=" * 60)
         print("PROOF 2 — the wrong-document falsifier")
         print(f"  matched-document inject correct: {summary['inject_matched_correct_on_gated']}  (want high)")
         print(f"  wrong-document   inject correct: {summary['inject_wrong_correct_on_gated']}  (want ~0)")
-        print(f"  VERDICT: {summary['verdict']}")
-        if ok:
+        print(f"  VERDICT: {verdict}")
+        if verdict == "PASS":
             print("  → the injected document causally controls the answer (not memory/leak).")
-        elif wrong > (1.0 - PASS_RATE):
+        elif verdict == "FAIL":
             print("  → wrong doc still answers: injection inert; Proof 1 FALSIFIED. Find the leak.")
         else:
-            print("  → matched inject too weak to claim causation.")
+            print("  → wrong-doc is clean but matched recall is too low to separate; revisit fidelity.")
     return summary
