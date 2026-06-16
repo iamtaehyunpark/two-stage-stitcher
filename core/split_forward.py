@@ -197,6 +197,40 @@ def _clear_cache_layers(cache, layer_indices):
             _cache_set(cache, i, k[:, :, :0, :], v[:, :, :0, :])
 
 
+def subset_doc_cache(cache, positions):
+    """
+    Return a deep copy of `cache` keeping only the document key/value pairs at the
+    given ORIGINAL `positions` (a list/iterable of int indices into 0..N-1) at every
+    populated layer. Already-cleared (empty) layers are left empty.
+
+    Why this preserves the experiment (Proof 3's central correctness condition):
+    in Llama-family attention RoPE is applied to the keys *before* they are written
+    to the KV cache, so a cached key at original position p carries the rotation for
+    p baked in. Slicing the sequence dimension therefore keeps each surviving
+    position's ABSOLUTE-position encoding intact — positions are NOT renumbered. The
+    query, still asked from offset N (the full document length), sees each needle at
+    its true relative distance (N − p), exactly as in the all-N forward. Compacting
+    the needles to 0,1,2,… and re-deriving RoPE would corrupt every query→needle
+    distance; this function deliberately does not do that.
+
+    `positions` are sorted and de-duplicated so the kept keys stay in causal order;
+    the model never attends in a different order than it would have over the full
+    document. The caller is responsible for telling `split_forward_generate` the new
+    cached count via `n_doc_cached=len(set(positions))` while keeping `n_doc` at the
+    full document length so the query offset is unchanged.
+    """
+    out = _clone_cache(cache)
+    idx = sorted(set(int(p) for p in positions))
+    n = _cache_num_layers(out)
+    for i in range(n):
+        k, v = _cache_get(out, i)
+        if k is None or k.numel() == 0:
+            continue
+        sel = torch.tensor(idx, dtype=torch.long, device=k.device)
+        _cache_set(out, i, k.index_select(2, sel), v.index_select(2, sel))
+    return out
+
+
 # ── layer-call plumbing (signature- and device-robust) ───────────────────────
 
 def _layer_param_names(model):
@@ -308,6 +342,7 @@ def split_forward_generate(
     clear_lower: bool = True,
     query_ids: Optional[torch.Tensor] = None,
     return_ids: bool = False,
+    n_doc_cached: Optional[int] = None,
 ):
     """
     Generate an answer given a document supplied as `doc_cache` (from
@@ -321,11 +356,24 @@ def split_forward_generate(
     split-forward (document absent below `target_layer`), False for the
     prefix-cache identity check (document present at every layer).
 
+    `n_doc` is the document's FULL length: it sets the query's absolute position
+    offset (RoPE), so the query is always asked from N…N+M-1 regardless of how many
+    document keys actually remain in the cache. `n_doc_cached` is the number of
+    document keys physically present in `doc_cache` at the upper layers — equal to
+    `n_doc` for a full cache, but smaller when a subset was kept (Proof 3, via
+    `subset_doc_cache`). It sizes the doc-visible attention mask and the physical
+    cache positions. Decoupling the two is what lets a sparse handoff keep its
+    needles at their original positions while the query still attends from the
+    right place. Defaults to `n_doc` (the full-cache case).
+
     Returns the decoded string, or the list of generated token ids if
     `return_ids=True`.
     """
     # The caller's document cache is reused across questions; never mutate it.
     doc_cache = _clone_cache(doc_cache)
+
+    if n_doc_cached is None:
+        n_doc_cached = n_doc
 
     L = len(model.model.layers)
     dtype = model.model.embed_tokens.weight.dtype
@@ -334,9 +382,9 @@ def split_forward_generate(
     use_pe = _supports_position_embeddings(model)
     eos_id = tokenizer.eos_token_id
 
-    # The document occupies positions 0..n_doc-1 at the upper layers regardless;
-    # `clear_lower` only decides whether it also occupies the lower-layer cache.
-    lower_doc_len = 0 if clear_lower else n_doc
+    # The document occupies `n_doc_cached` key slots at the upper layers; `clear_lower`
+    # only decides whether it also occupies the lower-layer cache.
+    lower_doc_len = 0 if clear_lower else n_doc_cached
 
     # ── query prefill ────────────────────────────────────────────────────────
     if query_ids is None:
@@ -346,6 +394,8 @@ def split_forward_generate(
     hidden = model.model.embed_tokens(q_ids)                     # (1, M, D)
 
     # RoPE/position bookkeeping: absolute query positions are n_doc..n_doc+M-1.
+    # This is the FULL-document offset and is independent of how many document keys
+    # remain cached — a sparse needle handoff is still queried from position N.
     pos_q = torch.arange(n_doc, n_doc + M, device=embed_device)[None, :]
     pe_q = _rope(model, hidden, pos_q) if use_pe else None
 
@@ -356,9 +406,10 @@ def split_forward_generate(
     hidden = _run_stage(model, range(0, target_layer), hidden, lower_mask,
                         pos_q, doc_cache, lower_cache_pos, pe_q, sig)
 
-    # Upper stack: cache holds {document(n_doc)} then appends the query.
-    upper_mask = _doc_query_mask(n_doc, M, dtype, embed_device)
-    upper_cache_pos = torch.arange(n_doc, n_doc + M, device=embed_device)
+    # Upper stack: cache holds {document(n_doc_cached)} then appends the query. The
+    # mask width and physical cache positions follow the CACHED count, not n_doc.
+    upper_mask = _doc_query_mask(n_doc_cached, M, dtype, embed_device)
+    upper_cache_pos = torch.arange(n_doc_cached, n_doc_cached + M, device=embed_device)
     hidden = _run_stage(model, range(target_layer, L), hidden, upper_mask,
                         pos_q, doc_cache, upper_cache_pos, pe_q, sig)
 
@@ -367,7 +418,7 @@ def split_forward_generate(
 
     generated = [next_id]
     lower_len = lower_doc_len + M
-    upper_len = n_doc + M
+    upper_len = n_doc_cached + M
     pos = n_doc + M
 
     # ── decode loop (single token at a time; cache lengths differ per stage) ──

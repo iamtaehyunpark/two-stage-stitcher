@@ -18,7 +18,7 @@ The SLM enters only at Proof 6.
 | 0 | Split-forward plumbing | harness is correct | split-forward(true) ≈ A | plumbing bug; nothing below interpretable | **PASS** (clean at every layer 12–64) |
 | 1 | Injection premise | injected states are read & reasoned over | inject-all-N succeeds where C fails | premise broken → **stop project** | **CONFIRMED** (layer-dependent; ≈1.0 at L12–14) |
 | 2 | Wrong-doc falsifier | it's injection, not memory | wrong-doc fails X | "success" was memory → **falsified** | **PASS** (wrong-doc 0.00 at L12/24/25) |
-| 3 | Path resolution | full prefix vs sparse needles | (see outcomes) | — | pending (blocked by 2) |
+| 3 | Path resolution | full prefix vs sparse needles | (see outcomes) | — | **implemented** (`proofs/p3_path.py`, fixed at layer 12); awaiting run |
 | 4 | Length scaling | survives long context | recall holds at 16k/32k+ | dies at length → premise unproven | pending (blocked by 3) |
 | 5 | Latent beats text-RAG | reason to exist | latent ≥ text-RAG at lower cost | dead weight vs RAG | pending (blocked by 4) |
 | 6 | Stitcher reproduces states | the SLM works | stitched recovers facts | translation is the real bottleneck | pending (blocked by 5) |

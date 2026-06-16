@@ -37,7 +37,9 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.split_forward import capture_doc_cache, split_forward_generate
+from core.split_forward import (
+    capture_doc_cache, split_forward_generate, subset_doc_cache,
+)
 
 
 def _tiny_model(seed=0):
@@ -118,6 +120,33 @@ def run(target_layer=3, n_new=12, seed=0, verbose=True):
         print(f"[C] prefix-cache identity   : {'PASS' if pass_c else 'FAIL'}")
         if not pass_c:
             print(f"    ref={ref_c}\n    got={got_c}")
+
+    # ── Invariant D — subset-to-all identity (Proof 3 plumbing) ───────────────
+    # Subsetting the document cache to ALL of its positions must be a no-op: it
+    # exercises the slice + the n_doc_cached-vs-n_doc decoupling (mask width,
+    # physical cache positions) while leaving every key untouched, so it must
+    # reproduce the real split-forward token-for-token. This certifies the
+    # mechanics that Proof 3's needle subsets rely on; the choice of WHICH
+    # positions to keep is a science question for the 70B, not this test.
+    real_cache, _, N2 = capture_doc_cache(model, doc_ids, target_layer, clear_lower=True)
+    got_real = split_forward_generate(
+        model, tok, real_cache, n_doc=N2, query_ids=q_ids,
+        target_layer=target_layer, max_new_tokens=n_new,
+        clear_lower=True, return_ids=True,
+    )
+    all_positions = list(range(N2))
+    sub_cache = subset_doc_cache(real_cache, all_positions)
+    got_sub = split_forward_generate(
+        model, tok, sub_cache, n_doc=N2, n_doc_cached=len(all_positions),
+        query_ids=q_ids, target_layer=target_layer, max_new_tokens=n_new,
+        clear_lower=True, return_ids=True,
+    )
+    pass_d = got_sub == got_real
+    ok &= pass_d
+    if verbose:
+        print(f"[D] subset-to-all identity  : {'PASS' if pass_d else 'FAIL'}")
+        if not pass_d:
+            print(f"    real={got_real}\n    sub ={got_sub}")
 
     if verbose:
         print("=" * 48)

@@ -27,7 +27,9 @@ sys.path.insert(0, str(_ROOT / "evaluate"))     # reuse the env-faithful loaders
 
 from run_conditions import load_deepseek          # noqa: E402  (env-faithful loader)
 from oracle_probe import strip_think               # noqa: E402
-from core.split_forward import capture_doc_cache, split_forward_generate  # noqa: E402
+from core.split_forward import (                                          # noqa: E402
+    capture_doc_cache, split_forward_generate, subset_doc_cache,
+)
 
 
 # ── prompts ───────────────────────────────────────────────────────────────────
@@ -135,5 +137,22 @@ def inject_answer(model, tokenizer, doc_cache, n_doc, question, target_layer,
         model, tokenizer, doc_cache, n_doc,
         query_text=_with_think_control(QUERY_PROMPT.format(question=question)),
         target_layer=target_layer, max_new_tokens=max_new_tokens,
+    )
+    return final_answer(text)
+
+
+def inject_answer_subset(model, tokenizer, doc_cache, n_doc, positions, question,
+                         target_layer, max_new_tokens=256):
+    """Proof 3: answer `question` with only the document positions in `positions`
+    injected — the rest of the layer-`target_layer` trace is absent. `n_doc` stays
+    the FULL document length (so the query is still asked from offset N and the kept
+    positions keep their original RoPE), while the cache is sliced to `positions`
+    and the physical bookkeeping told the new count via `n_doc_cached`."""
+    sub_cache = subset_doc_cache(doc_cache, positions)
+    text = split_forward_generate(
+        model, tokenizer, sub_cache, n_doc,
+        query_text=_with_think_control(QUERY_PROMPT.format(question=question)),
+        target_layer=target_layer, max_new_tokens=max_new_tokens,
+        n_doc_cached=len(set(positions)),
     )
     return final_answer(text)

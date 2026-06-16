@@ -29,10 +29,12 @@ cache / decode bugs before any H200 time:
 python core/selftest_split_forward.py
 ```
 
-Two exact invariants must pass: the no-document reduction (split-forward with an
-empty document == ordinary generation) and the prefix-cache identity (document
-present at every layer, query at offset positions == ordinary prefix-cached
-generation). If either fails, fix `core/split_forward.py` — do not proceed.
+Three exact invariants must pass: the no-document reduction (split-forward with an
+empty document == ordinary generation), the prefix-cache identity (document present
+at every layer, query at offset positions == ordinary prefix-cached generation), and
+the subset-to-all identity (subsetting the cache to *every* position is a no-op,
+certifying the Proof-3 slice + `n_doc_cached` bookkeeping). If any fails, fix
+`core/split_forward.py` — do not proceed.
 
 **2 · Run the chain on the box with the 70B (one model load).**
 
@@ -50,7 +52,17 @@ Individual rungs (each loads the model itself):
 python proofs/p0_plumbing.py   --out proofs/data/p0.json   # memorized doc: SF-true ≈ A
 python proofs/p1_premise.py    --out proofs/data/p1.json   # synthetic facts: inject succeeds where C fails
 python proofs/p2_falsifier.py  --out proofs/data/p2.json   # wrong-doc control: inject-wrong must fail
+python proofs/p3_path.py --layer 12 --out proofs/data/p3.json   # travels light? needles-only vs all-N vs random
 ```
+
+**3 · Resolve the path (Proof 3) at the winning layer.** Fixed at layer 12 (the
+1.00-recall winner). Per gated question it injects the full trace (all-N), only the
+answer-bearing token positions (needles-only), the same count of off-needle
+positions (random-subset, the control), and the single last needle token. The
+needle span is taken from each QA's `needle` text, mapped to its *original* token
+positions, and injected at those positions — never renumbered (RoPE correctness).
+Add `--curve` to map recall vs #needle-positions; `--no-sink` to drop the attention
+sink from the sparse conditions.
 
 ## What each rung decides
 
