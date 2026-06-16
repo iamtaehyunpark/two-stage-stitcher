@@ -1,0 +1,47 @@
+[
+  {
+    "doc_name": "wiki_00876.txt",
+    "question": "What is the name of the six-volume series of books for which Andrzej Sapkowski is best known?",
+    "reference_answer": "The Witcher",
+    "doc_tokens": 1313,
+    "answer_a": "The six-volume series of books for which Andrzej Sapkowski is best known is **The Witcher**.",
+    "answer_oracle_seq": "a the a the a the a the a the a the a the a the a the",
+    "answer_oracle_last": "The six-volume series of books for which Andrzej Sapkowski is best known is called **The Witcher**. This series includes both short story collections and novels, and it serves as the basis for the popular video games and other adaptations."
+  },
+  {
+    "doc_name": "wiki_00876.txt",
+    "question": "In what year was the first short story of The Witcher published in the Fantastyka magazine?",
+    "reference_answer": "1986",
+    "doc_tokens": 1313,
+    "answer_a": "The first short story of The Witcher was published in 1986 in the Fantastyka magazine.\n\n**Answer:** 1986",
+    "answer_oracle_seq": "a the a the a the a the a the a the a the a the",
+    "answer_oracle_last": "The first short story of The Witcher, titled \"The Witcher,\" was published in the Fantastyka magazine in 1986."
+  },
+  {
+    "doc_name": "wiki_00876.txt",
+    "question": "What is the name of the main character in The Witcher series?",
+    "reference_answer": "Geralt of Rivia",
+    "doc_tokens": 1313,
+    "answer_a": "The main character in The Witcher series is Geralt of Rivia.",
+    "answer_oracle_seq": "a the a the a the a the a the a the a the a the a the a the a the",
+    "answer_oracle_last": "**Question:** What is the name of the main character in *The Witcher* series?  \n**Answer:** **Geralt of Rivia**"
+  },
+  {
+    "doc_name": "wiki_00876.txt",
+    "question": "What is the title of the standalone prequel novel in The Witcher series published in 2013?",
+    "reference_answer": "Season of Storms",
+    "doc_tokens": 1313,
+    "answer_a": "The title of the standalone prequel novel in The Witcher series published in 2013 is **Season of Storms**.",
+    "answer_oracle_seq": "a the a the a the a the a the a the a the a the",
+    "answer_oracle_last": "The title of the standalone prequel novel in The Witcher series published in 2013 is \"Season of Storms.\""
+  },
+  {
+    "doc_name": "wiki_00876.txt",
+    "question": "What is the name of the trilogy set in the 15th century during the Hussite Wars?",
+    "reference_answer": "The Hussite Trilogy",
+    "doc_tokens": 1313,
+    "answer_a": "The name of the trilogy set in the 15th century during the Hussite Wars is **The Hussite Trilogy**.",
+    "answer_oracle_seq": "a the a the a the a the a the a the a the a the a the",
+    "answer_oracle_last": "The trilogy set in the 15th century during the Hussite Wars is called \"The Hussite Trilogy\" by Andrea Frediani. It includes the books \"The Ambush,\" \"The Blood of the Martyrs,\" and \"The Siege of Brescia,\" exploring themes of faith, war, and survival amidst religious and political"
+  }
+]
