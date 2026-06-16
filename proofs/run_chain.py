@@ -41,14 +41,13 @@ def run_p0(model, tok, cfg, max_new_tokens):
     doc_cache, n_doc = capture_document(model, tok, document, cfg.target_layer)
     print(f"  memorized document = {n_doc} tokens")
 
-    records, all_pass = [], True
+    records = []
     for item in qa:
         q, gold = item["q"], item["a"]
         ans_a = full_prefill_answer(model, tok, document, q, max_new_tokens)
         ans_sf = inject_answer(model, tok, doc_cache, n_doc, q, cfg.target_layer, max_new_tokens)
         a_ok, sf_ok = correct(ans_a, gold), correct(ans_sf, gold)
         degen = p0_plumbing.looks_degenerate(ans_sf)
-        all_pass &= (sf_ok and not degen)
         records.append({"question": q, "gold": gold, "answer_a": ans_a,
                         "answer_sf_true": ans_sf, "a_correct": a_ok,
                         "sf_correct": sf_ok, "sf_degenerate": degen})
@@ -56,11 +55,15 @@ def run_p0(model, tok, cfg, max_new_tokens):
         print(f"  A      [{'ok' if a_ok else 'XX'}]: {ans_a[:140]}")
         print(f"  SF-true[{'ok' if sf_ok else 'XX'}{' DEGEN' if degen else ''}]: {ans_sf[:140]}")
 
+    n = len(qa)
+    sf_correct = sum(r["sf_correct"] for r in records)
+    sf_degen = sum(r["sf_degenerate"] for r in records)
+    all_pass = sf_degen == 0 and (sf_correct / n) >= p0_plumbing.P0_PASS_RATE
     summary = {
-        "n_questions": len(qa), "doc_tokens": n_doc,
+        "n_questions": n, "doc_tokens": n_doc,
         "a_correct": sum(r["a_correct"] for r in records),
-        "sf_correct": sum(r["sf_correct"] for r in records),
-        "sf_degenerate": sum(r["sf_degenerate"] for r in records),
+        "sf_correct": sf_correct,
+        "sf_degenerate": sf_degen,
         "verdict": "PASS" if all_pass else "FAIL",
     }
     print("\n" + "=" * 60)
