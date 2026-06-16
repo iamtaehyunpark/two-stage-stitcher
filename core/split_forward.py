@@ -61,6 +61,7 @@ Robustness notes
 
 from __future__ import annotations
 
+import copy
 import inspect
 from typing import Optional, Tuple
 
@@ -77,16 +78,63 @@ def _new_dynamic_cache():
     return DynamicCache()
 
 
+# DynamicCache's internals changed across transformers versions: the legacy API
+# exposes `key_cache` / `value_cache` lists of tensors; the refactored API
+# (≥ 4.54) stores `layers[i].keys` / `layers[i].values` on per-layer objects.
+# These accessors hide the difference so the split-forward works on both.
+
+def _kv_attr_names(layer_obj):
+    for kk, vv in (("keys", "values"), ("key_states", "value_states"),
+                   ("key_cache", "value_cache")):
+        if hasattr(layer_obj, kk) and hasattr(layer_obj, vv):
+            return kk, vv
+    return None
+
+
+def _cache_num_layers(cache) -> int:
+    if hasattr(cache, "key_cache"):
+        return len(cache.key_cache)
+    if hasattr(cache, "layers"):
+        return len(cache.layers)
+    raise AttributeError(
+        "Unrecognised DynamicCache layout (no `key_cache` and no `layers`). "
+        "Report your transformers version so split_forward.py can support it."
+    )
+
+
+def _cache_get(cache, i):
+    """Return (keys, values) tensors for layer i, or (None, None)."""
+    if hasattr(cache, "key_cache"):
+        if i < len(cache.key_cache):
+            return cache.key_cache[i], cache.value_cache[i]
+        return None, None
+    layer = cache.layers[i]
+    names = _kv_attr_names(layer)
+    if names is None:
+        raise AttributeError(
+            f"Cannot find key/value attributes on {type(layer).__name__}. "
+            "Report your transformers version so split_forward.py can support it."
+        )
+    return getattr(layer, names[0]), getattr(layer, names[1])
+
+
+def _cache_set(cache, i, k, v):
+    if hasattr(cache, "key_cache"):
+        cache.key_cache[i] = k
+        cache.value_cache[i] = v
+        return
+    layer = cache.layers[i]
+    names = _kv_attr_names(layer)
+    setattr(layer, names[0], k)
+    setattr(layer, names[1], v)
+
+
 def _clone_cache(cache):
-    """Deep-copy a DynamicCache's tensors so a generation call can append query /
-    generated KV without mutating the caller's document cache (which is reused
-    across many questions). Per-tensor `.clone()` preserves each layer's device."""
-    new = _new_dynamic_cache()
-    new.key_cache = [k.clone() for k in cache.key_cache]
-    new.value_cache = [v.clone() for v in cache.value_cache]
-    if hasattr(cache, "_seen_tokens"):
-        new._seen_tokens = cache._seen_tokens
-    return new
+    """Deep-copy the document cache so a generation call can append query /
+    generated KV without mutating the caller's cache (reused across many
+    questions). `copy.deepcopy` clones every tensor on its own device and is
+    agnostic to the DynamicCache internal layout."""
+    return copy.deepcopy(cache)
 
 
 def capture_doc_cache(model, doc_ids: torch.Tensor, target_layer: int,
@@ -140,11 +188,13 @@ def capture_doc_cache(model, doc_ids: torch.Tensor, target_layer: int,
 
 def _clear_cache_layers(cache, layer_indices):
     """Truncate the given layers' KV to length 0, preserving shape metadata."""
+    n = _cache_num_layers(cache)
     for i in layer_indices:
-        if i < len(cache.key_cache) and cache.key_cache[i] is not None \
-                and cache.key_cache[i].numel() > 0:
-            cache.key_cache[i] = cache.key_cache[i][:, :, :0, :]
-            cache.value_cache[i] = cache.value_cache[i][:, :, :0, :]
+        if i >= n:
+            continue
+        k, v = _cache_get(cache, i)
+        if k is not None and k.numel() > 0:
+            _cache_set(cache, i, k[:, :, :0, :], v[:, :, :0, :])
 
 
 # ── layer-call plumbing (signature- and device-robust) ───────────────────────
