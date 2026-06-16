@@ -200,7 +200,8 @@ def main():
     else:
         print("\n!!! No winning layer found (no layer passed Proof 0).")
 
-    out_file = os.path.join(args.out_dir, "sweep_results.json")
+    layers_str = "_".join(str(l) for l in layers)
+    out_file = os.path.join(args.out_dir, f"sweep_results_{layers_str}.json")
     with open(out_file, "w") as f:
         # We convert layer keys to strings for JSON compliance
         json_save = {str(k): v for k, v in sweep_results.items() if k != "winning_layer"}
