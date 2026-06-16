@@ -1,0 +1,57 @@
+{
+  "summary": {
+    "n_questions": 5,
+    "doc_tokens": 130,
+    "a_correct": 5,
+    "sf_correct": 4,
+    "sf_degenerate": 0,
+    "verdict": "PASS"
+  },
+  "records": [
+    {
+      "question": "In which mountain range does Mount Everest lie?",
+      "gold": "Himalaya",
+      "answer_a": "The Mahalangur Himal sub-range of the Himalayas.",
+      "answer_sf_true": "Mount Everest is located in the Mahalangur Himal sub-range of the Himalayan mountain range.",
+      "a_correct": true,
+      "sf_correct": true,
+      "sf_degenerate": false
+    },
+    {
+      "question": "Who was the first to reach the summit of Mount Everest, in 1953?",
+      "gold": "Hillary",
+      "answer_a": "Edmund Hillary of New Zealand and Tenzing Norgay, a Sherpa of Nepal, were the first to reach the summit of Mount Everest on May 29, 1953.",
+      "answer_sf_true": "The first people to reach the summit of Mount Everest were Sir Edmund Hillary from New Zealand and Tenzing Norgay, a Nepali Sherpa mountaineer. They achieved this historic feat on May 29, 1953.",
+      "a_correct": true,
+      "sf_correct": true,
+      "sf_degenerate": false
+    },
+    {
+      "question": "Who accompanied Edmund Hillary on the first ascent of Mount Everest?",
+      "gold": "Tenzing Norgay",
+      "answer_a": "Tenzing Norgay, a Sherpa of Nepal, accompanied Edmund Hillary on the first ascent of Mount Everest.",
+      "answer_sf_true": "I do not know.",
+      "a_correct": true,
+      "sf_correct": false,
+      "sf_degenerate": false
+    },
+    {
+      "question": "After whom was Mount Everest named?",
+      "gold": "George Everest",
+      "answer_a": "The mountain was named after Sir George Everest, a former Surveyor General of India.",
+      "answer_sf_true": "Mount Everest was named after Sir George Everest, a British surveyor-general of India.",
+      "a_correct": true,
+      "sf_correct": true,
+      "sf_degenerate": false
+    },
+    {
+      "question": "What is Mount Everest called in Tibetan?",
+      "gold": "Chomolungma",
+      "answer_a": "Chomolungma",
+      "answer_sf_true": "Mount Everest is called \"Chomolungma\" in Tibetan.",
+      "a_correct": true,
+      "sf_correct": true,
+      "sf_degenerate": false
+    }
+  ]
+}
