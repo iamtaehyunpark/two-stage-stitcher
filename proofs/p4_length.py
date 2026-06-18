@@ -53,20 +53,30 @@ STAGED — let the first curve tell you where to spend (don't run the full grid 
 
 Usage:
     # Stage 1 — the gate. Cheap; tells you if there is even a problem.
-    CUDA_VISIBLE_DEVICES=0,1,2,3 python proofs/p4_length.py --stage curve \
+    CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python proofs/p4_length.py --stage curve \
         --lengths 500,2000,8000 --layer 12 --out proofs/data/p4_curve.json
 
     # Stage 2 — only at the length where recall first dropped, re-sweep the layer.
-    CUDA_VISIBLE_DEVICES=0,1,2,3 python proofs/p4_length.py --stage relayer \
+    CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python proofs/p4_length.py --stage relayer \
         --lengths 8000,16000 --layers 8,12,20,30 --out proofs/data/p4_relayer.json
 
     # Stage 3 — depth, sparse handoff, latent-vs-text, at the winning layer.
-    CUDA_VISIBLE_DEVICES=0,1,2,3 python proofs/p4_length.py --stage axes \
+    CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python proofs/p4_length.py --stage axes \
         --lengths 2000,8000,16000 --depths 0.1,0.5,0.9 --layer 12 \
         --keep-rate 0.5 --out proofs/data/p4_axes.json
+
+By default the 70B is sharded across EVERY visible GPU (more shards → lower per-GPU
+memory, which is what lets the 32k full-prefill fit); pass --gpus to restrict.
 """
 
 import os
+
+# Long-context prefill at 32k fragments the allocator; the expandable-segments arena
+# lets a freed cache's blocks be reused by the next, larger allocation instead of
+# stranding them. Must be set before the first CUDA init (i.e. before torch loads via
+# the imports below), so it lives at the very top.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 import sys
 import json
 import argparse
@@ -88,6 +98,20 @@ from proofs.synthetic_eval import STRONG_RATE, MIN_GATED
 # Recall at/above STRONG_RATE "holds"; reuse the chain-wide bar so Proof 4's verdict
 # is on the same scale as Proofs 1–3.
 HOLDS = STRONG_RATE
+
+
+def _free_cuda():
+    """Drop dead tensors and return their CUDA blocks to the allocator. Called between
+    captures and cells so a long document's KV cache (several GB at 32k) does not
+    linger while the next cell's full-prefill peaks — the lingering cache, not the
+    model, is what pushes a single shard OOM at the longest lengths."""
+    import gc
+    import torch
+    gc.collect()
+    if torch.cuda.is_available():
+        for i in range(torch.cuda.device_count()):
+            with torch.cuda.device(i):
+                torch.cuda.empty_cache()
 
 
 # ── one (doc, length, depth) build + its layer-independent gates ───────────────
@@ -159,6 +183,7 @@ def evaluate(model, tok, docs, lengths, depths, layers, conditions, keep_rate,
                     print(f"  capturing {base_doc['name']} @ {padded['n_tokens']}tok "
                           f"depth={depth} layer={layer} …")
                     cache, _Y, n_doc = capture_doc_cache(model, ids, layer)
+                    del _Y          # the (1, N, D) layer-input states are unused here
 
                     for qa in qa_items:
                         rec = {
@@ -206,6 +231,15 @@ def evaluate(model, tok, docs, lengths, depths, layers, conditions, keep_rate,
 
                         records.append(rec)
                         _print_rec(rec, conditions)
+
+                    # Release this layer's doc cache before capturing the next layer
+                    # (or before the next cell's full-prefill gates), so at most one
+                    # long KV cache is resident at a time.
+                    del cache
+                    _free_cuda()
+
+                del ids
+                _free_cuda()
     return records
 
 
@@ -448,7 +482,10 @@ def main():
     parser.add_argument("--max-doc-tokens", type=int, default=40000,
                         help="truncation cap for capture/prefill (raise above your max length)")
     parser.add_argument("--max-new-tokens", type=int, default=512)
-    parser.add_argument("--gpus", default="0,1,2,3")
+    parser.add_argument("--gpus", default=None,
+                        help="comma-separated logical GPU indices to shard the 70B "
+                             "across; default = ALL visible GPUs. More shards → lower "
+                             "per-GPU memory, which is what lets 32k prefill fit.")
     parser.add_argument("--reasoning", action="store_true",
                         help="let R1 emit <think> traces instead of suppressing them")
     args = parser.parse_args()
@@ -471,7 +508,14 @@ def main():
 
     from config import StitcherConfig
     cfg = StitcherConfig()
-    devices = tuple(int(x) for x in args.gpus.split(","))
+    if args.gpus:
+        devices = tuple(int(x) for x in args.gpus.split(","))
+    else:
+        import torch
+        devices = tuple(range(torch.cuda.device_count()))   # use every visible GPU
+        if not devices:
+            raise RuntimeError("no CUDA devices visible — set CUDA_VISIBLE_DEVICES")
+    print(f"  sharding DeepSeek-70B across {len(devices)} GPU(s): {devices}")
     tok, model = load_deepseek(cfg, devices=devices)
 
     print(f"\n########## PROOF 4 — length scaling (stage={args.stage}) ##########")

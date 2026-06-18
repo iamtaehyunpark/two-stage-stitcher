@@ -102,23 +102,30 @@ Run it **staged** — the first curve tells you where to spend; don't run the fu
 
 ```bash
 # Stage 1 — the gate (cheapest): inject-all-N at L12, depth 50%, across lengths.
-CUDA_VISIBLE_DEVICES=0,1,2,3 python proofs/p4_length.py --stage curve \
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python proofs/p4_length.py --stage curve \
     --lengths 500,2000,8000,16000,32000 --layer 12 --out proofs/data/p4_curve.json
 
 # Stage 2 — ONLY at the length where recall first dropped: re-sweep the layer.
-CUDA_VISIBLE_DEVICES=0,1,2,3 python proofs/p4_length.py --stage relayer \
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python proofs/p4_length.py --stage relayer \
     --lengths 8000,16000 --layers 8,12,20,30 --out proofs/data/p4_relayer.json
 
 # Stage 3 — depth, sparse handoff, latent-vs-text, at the winning layer.
-CUDA_VISIBLE_DEVICES=0,1,2,3 python proofs/p4_length.py --stage axes \
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python proofs/p4_length.py --stage axes \
     --lengths 2000,8000,16000 --depths 0.1,0.5,0.9 --layer 12 --out proofs/data/p4_axes.json
 ```
 
 The headline is **recall vs length**; the verdict (`HOLDS_AT_LENGTH` /
 `DROP_AT_LENGTH_RESWEEP_LAYER` / `RESCUED_BY_RELAYER` / `DECAYS_AT_LENGTH`) keys on
-inject-all-N staying ≥ 0.8 as length grows. `--max-doc-tokens` (default 40000) is the
-truncation cap for capture/prefill — raise it above your longest length, and mind H200
-memory and the model's 128k context at 32k+. The static filler selftest runs first
+inject-all-N staying ≥ 0.8 as length grows.
+
+**Memory at length.** By default the 70B is sharded across **every visible GPU**
+(`--gpus` to restrict) — more shards means lower per-GPU memory, which is what lets the
+32k full-prefill (Condition A / the filler gate) fit; on 8×A100-80GB it has ample
+headroom. The runner also frees each document's KV cache before the next capture/prefill
+and sets `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` to fight fragmentation. If you
+still OOM at the longest length, add more GPUs or drop the top length. `--max-doc-tokens`
+(default 40000) is the truncation cap for capture/prefill — keep it above your longest
+length (and under the model's 128k context). The static filler selftest runs first
 (`python proofs/long_context_docs.py`); the behavioural inertness gate runs per cell.
 
 ## What each rung decides
