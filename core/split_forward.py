@@ -231,6 +231,87 @@ def subset_doc_cache(cache, positions):
     return out
 
 
+# ── RoPE re-rotation (the renumbered control) ─────────────────────────────────
+# The default subset keeps each needle at its ORIGINAL position (its baked-in RoPE
+# phase is untouched). The renumbered control deliberately does the opposite: it
+# moves kept keys to NEW positions to isolate the position effect from the semantic
+# one. Because RoPE is a rotation R(p) applied to the key at position p, a key
+# already carrying R(p) can be re-placed at position j by applying the *relative*
+# rotation R(j − p): R(j−p)·R(p) = R(j). We apply exactly that delta rotation to the
+# cached (already-rotated) keys; values are not rotated, so they are left alone.
+#
+# Assumption: the rotary embedding's `attention_scaling` is 1.0, so cos/sin are a
+# pure rotation and angles add (ω_d·j − ω_d·p = ω_d·(j−p)) — true for Llama-3.x
+# "default"/"llama3" rope (the project's DeepSeek-R1-Distill-Llama-70B). On a
+# "yarn"/"longrope" model where attention_scaling ≠ 1 the delta would re-apply the
+# magnitude factor and would need to be divided back out. The self-test's
+# translation-invariance invariant (F) certifies the rotation math on a default-rope
+# model.
+
+def _rotate_half(x):
+    half = x.shape[-1] // 2
+    return torch.cat((-x[..., half:], x[..., :half]), dim=-1)
+
+
+def _rerotate_keys(model, key, deltas):
+    """Apply the relative RoPE rotation `deltas` (1-D, one signed offset per key
+    position) to an already-rotated key tensor (1, n_kv_heads, S, head_dim)."""
+    cs = _rope(model, key, deltas[None, :].to(key.device))
+    if cs is None:
+        raise RuntimeError(
+            "RoPE re-rotation needs a position-id-driven rotary embedding "
+            "(model.model.rotary_emb(x, position_ids)); this model/transformers "
+            "version does not expose one. The renumbered control cannot run."
+        )
+    cos, sin = cs
+    # cos/sin arrive as (1, S, head_dim); add the head axis to broadcast over heads.
+    cos = cos.to(key.dtype).unsqueeze(1)
+    sin = sin.to(key.dtype).unsqueeze(1)
+    return key * cos + _rotate_half(key) * sin
+
+
+def rerotate_cache_keys(model, cache, deltas):
+    """In place over a (cloned) cache: re-rotate every populated layer's keys by the
+    per-position `deltas` (a 1-D long/float tensor whose length equals the cache's
+    current sequence length). Values are untouched."""
+    n = _cache_num_layers(cache)
+    for i in range(n):
+        k, v = _cache_get(cache, i)
+        if k is None or k.numel() == 0:
+            continue
+        if k.shape[2] != deltas.shape[0]:
+            raise ValueError(
+                f"deltas length {deltas.shape[0]} != layer {i} cache seq "
+                f"length {k.shape[2]}"
+            )
+        _cache_set(cache, i, _rerotate_keys(model, k, deltas), v)
+
+
+def subset_doc_cache_renumbered(model, cache, positions, target=None):
+    """The renumbered control: keep `positions` (original indices) and then move
+    their keys to `target` positions by RoPE delta-rotation. With `target=None` the
+    kept positions are compacted to a contiguous 0,1,2,… block (the natural
+    "renumbered" placement the text arm gets for free). Returns
+    `(new_cache, n_doc_renumbered)` where `n_doc_renumbered = max(target)+1` is the
+    query offset the caller should pass as `n_doc` (the query sits just past the
+    compacted document).
+
+    This is what proves the position bookkeeping is load-bearing: feed the SAME true
+    states the default subset feeds, but at renumbered positions. If recall survives
+    the subset and dies here, decimation per se was fine and renumbering was the
+    killer (Proof 0's relative-distance geometry, violated on purpose).
+    """
+    pos = sorted(set(int(p) for p in positions))
+    if target is None:
+        target = list(range(len(pos)))
+    if len(target) != len(pos):
+        raise ValueError("target must have one position per kept index")
+    sub = subset_doc_cache(cache, pos)        # keys still at original phases, sorted
+    deltas = torch.tensor([t - p for p, t in zip(pos, target)], dtype=torch.float32)
+    rerotate_cache_keys(model, sub, deltas)
+    return sub, int(max(target)) + 1
+
+
 # ── layer-call plumbing (signature- and device-robust) ───────────────────────
 
 def _layer_param_names(model):

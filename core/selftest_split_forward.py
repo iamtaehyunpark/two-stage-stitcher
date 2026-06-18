@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.split_forward import (
     capture_doc_cache, split_forward_generate, subset_doc_cache,
+    subset_doc_cache_renumbered,
 )
 
 
@@ -147,6 +148,48 @@ def run(target_layer=3, n_new=12, seed=0, verbose=True):
         print(f"[D] subset-to-all identity  : {'PASS' if pass_d else 'FAIL'}")
         if not pass_d:
             print(f"    real={got_real}\n    sub ={got_sub}")
+
+    # ── Invariant E — renumber-to-self identity (re-rotation no-op) ───────────
+    # Renumbering every position to itself is a zero-delta rotation: it must leave
+    # the keys untouched and reproduce the real split-forward token-for-token. This
+    # certifies the re-rotation wiring (cos/sin shape, rotate_half, head broadcast,
+    # device) is a true no-op when the delta is zero.
+    sub_self, n_self = subset_doc_cache_renumbered(
+        model, real_cache, all_positions, target=all_positions)
+    got_self = split_forward_generate(
+        model, tok, sub_self, n_doc=n_self, n_doc_cached=len(all_positions),
+        query_ids=q_ids, target_layer=target_layer, max_new_tokens=n_new,
+        clear_lower=True, return_ids=True,
+    )
+    pass_e = got_self == got_real
+    ok &= pass_e
+    if verbose:
+        print(f"[E] renumber-to-self ident. : {'PASS' if pass_e else 'FAIL'}")
+        if not pass_e:
+            print(f"    real={got_real}\n    self={got_self}")
+
+    # ── Invariant F — RoPE translation invariance (nonzero re-rotation) ───────
+    # Shift EVERY document key by a uniform +Δ and offset the query by the same +Δ.
+    # RoPE attention depends only on the query−key distance, so every distance is
+    # unchanged and the output must equal ordinary [doc; query] generation. Unlike E
+    # this exercises a nonzero rotation, so it catches a re-rotation that is wired
+    # but computes the wrong angle.
+    DELTA = 5
+    full_cache_f, _, Nf = capture_doc_cache(model, doc_ids, target_layer, clear_lower=False)
+    shifted, n_shift = subset_doc_cache_renumbered(
+        model, full_cache_f, list(range(Nf)),
+        target=[p + DELTA for p in range(Nf)])
+    got_f = split_forward_generate(
+        model, tok, shifted, n_doc=n_shift, n_doc_cached=Nf,
+        query_ids=q_ids, target_layer=target_layer, max_new_tokens=n_new,
+        clear_lower=False, return_ids=True,
+    )
+    pass_f = got_f == ref_c
+    ok &= pass_f
+    if verbose:
+        print(f"[F] RoPE translation invar. : {'PASS' if pass_f else 'FAIL'}")
+        if not pass_f:
+            print(f"    ref={ref_c}\n    got={got_f}")
 
     if verbose:
         print("=" * 48)

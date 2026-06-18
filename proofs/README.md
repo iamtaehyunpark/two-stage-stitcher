@@ -64,6 +64,31 @@ positions, and injected at those positions — never renumbered (RoPE correctnes
 Add `--curve` to map recall vs #needle-positions; `--no-sink` to drop the attention
 sink from the sparse conditions.
 
+**4 · Experiment 3.1 — latent-decimation vs. text-decimation.** Does an injected
+layer-12 state carry context its raw token does not? Thin each document two ways and
+compare the recall-vs-keep-rate curves: drop positions as **text** (re-tokenize the
+survivors, prefill) vs. as **latent** (inject only the survivors' true states). The
+divergence is the result — if latent holds while text collapses, latent ≠ text.
+
+```bash
+# ALWAYS run the sanity gates first and read them (the canary catches position bugs):
+CUDA_VISIBLE_DEVICES=0,1,2,3 python proofs/e31_decimation.py --layer 12 --sanity-only
+# then the full sweep + plot:
+CUDA_VISIBLE_DEVICES=0,1,2,3 python proofs/e31_decimation.py --layer 12 \
+    --out proofs/data/e31.json --plot proofs/data/e31.png
+```
+
+Conditions: `dec_text`, `dec_latent`, and `dec_latent_renumbered` (the same kept
+states RoPE-re-rotated to contiguous positions — the position-isolation control) ×
+`strided`/`random` patterns × `needle_protected`/`needle_decimated` variants, over
+keep-rates {1, ½, ¼, ⅛, 1/16}. Long coreference documents
+([`synthetic_docs_long.py`](synthetic_docs_long.py)) put the answer entity in the
+*decimatable* surroundings and refer to it obliquely in the needle, so decimated
+text collapses (the antecedent is gone) while full-context latent states may carry
+the resolved coreferent. The canary — `dec_latent` at keep-rate 1 must equal
+`full_latent` — is the first thing to check: if it fails, the position/decimation
+bookkeeping is wrong and the sweep is noise.
+
 ## What each rung decides
 
 | Rung | Document | Decides | PASS | FAIL |

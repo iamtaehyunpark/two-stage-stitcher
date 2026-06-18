@@ -6,3 +6,4 @@ vllm>=0.4.0
 numpy>=1.26.0
 scipy>=1.12.0
 tqdm>=4.66.0
+matplotlib>=3.7.0   # Exp 3.1 decimation curves (optional; plotting is guarded)

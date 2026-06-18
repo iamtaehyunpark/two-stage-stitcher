@@ -29,6 +29,7 @@ from run_conditions import load_deepseek          # noqa: E402  (env-faithful lo
 from oracle_probe import strip_think               # noqa: E402
 from core.split_forward import (                                          # noqa: E402
     capture_doc_cache, split_forward_generate, subset_doc_cache,
+    subset_doc_cache_renumbered,
 )
 
 
@@ -151,6 +152,23 @@ def inject_answer_subset(model, tokenizer, doc_cache, n_doc, positions, question
     sub_cache = subset_doc_cache(doc_cache, positions)
     text = split_forward_generate(
         model, tokenizer, sub_cache, n_doc,
+        query_text=_with_think_control(QUERY_PROMPT.format(question=question)),
+        target_layer=target_layer, max_new_tokens=max_new_tokens,
+        n_doc_cached=len(set(positions)),
+    )
+    return final_answer(text)
+
+
+def inject_answer_renumbered(model, tokenizer, doc_cache, positions, question,
+                             target_layer, max_new_tokens=256):
+    """The renumbered control (Exp 3.1): inject the SAME kept positions' true states
+    as `inject_answer_subset`, but RoPE-re-rotated to contiguous positions 0..k-1
+    with the query asked from offset k. Isolates the position effect — if recall
+    survives the original-position subset but dies here, renumbering (not decimation)
+    is what breaks the latent handoff."""
+    sub_cache, n_renum = subset_doc_cache_renumbered(model, doc_cache, positions)
+    text = split_forward_generate(
+        model, tokenizer, sub_cache, n_renum,
         query_text=_with_think_control(QUERY_PROMPT.format(question=question)),
         target_layer=target_layer, max_new_tokens=max_new_tokens,
         n_doc_cached=len(set(positions)),
