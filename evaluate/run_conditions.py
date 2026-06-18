@@ -39,13 +39,24 @@ Question: {question}
 Answer:"""
 
 
-def load_deepseek(cfg, devices=None):
+def load_deepseek(cfg, devices=None, device_map="sequential",
+                  max_memory_per_gpu="70GiB"):
     """
     Load DeepSeek-70B once; shared by conditions A, B, and C.
 
     `devices` is the tuple of (logical) GPU indices to shard across.
     When condition B is skipped, pass all 4 GPUs to speed up A/C prefill;
     when B runs, leave GPU 3 free for Qwen + the stitcher (default).
+
+    `device_map` controls HOW the layers are placed across `devices`:
+      "sequential" (default) fills each GPU to `max_memory_per_gpu` before moving to
+          the next — so a ~140GB bf16 70B packs into the FIRST TWO 80GB GPUs and never
+          touches the rest, leaving GPU 0 no room for a long-context prefill's
+          activation. Fine for short docs; wrong for Proof 4.
+      "balanced_low_0" spreads the layers EVENLY across every device and keeps GPU 0
+          the lightest (it also drives the forward pass / holds the inputs), which is
+          what long-context prefill needs. Pass this when sharding across many GPUs.
+    `max_memory_per_gpu` is the per-GPU upper bound handed to accelerate.
     """
     import torch
     from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -53,13 +64,14 @@ def load_deepseek(cfg, devices=None):
     if devices is None:
         devices = cfg.llama_devices
     dtype = getattr(torch, cfg.dtype)
-    max_memory = {i: "70GiB" for i in devices}
-    print(f"Loading {cfg.target_model} on GPUs {tuple(devices)} …")
+    max_memory = {i: max_memory_per_gpu for i in devices}
+    print(f"Loading {cfg.target_model} on GPUs {tuple(devices)} "
+          f"(device_map={device_map}, max_memory_per_gpu={max_memory_per_gpu}) …")
     tokenizer = AutoTokenizer.from_pretrained(cfg.target_model)
     model = AutoModelForCausalLM.from_pretrained(
         cfg.target_model,
         torch_dtype=dtype,
-        device_map="sequential",
+        device_map=device_map,
         max_memory=max_memory,
     )
     model.eval()

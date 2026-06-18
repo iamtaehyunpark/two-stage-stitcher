@@ -100,6 +100,25 @@ from proofs.synthetic_eval import STRONG_RATE, MIN_GATED
 HOLDS = STRONG_RATE
 
 
+def _report_gpu_placement(model):
+    """Print how many decoder layers landed on each GPU and the per-GPU memory now
+    held, so you can SEE the 70B is spread across all the GPUs you asked for — not
+    packed into the first two (the device_map='sequential' trap that OOMs at 32k)."""
+    import torch
+    from collections import Counter
+    counts = Counter()
+    for name, p in model.named_parameters():
+        if p.device.type == "cuda":
+            counts[p.device.index] += 1
+    print("  GPU placement (param tensors / memory):")
+    for i in sorted(counts):
+        alloc = torch.cuda.memory_allocated(i) / 1e9 if torch.cuda.is_available() else 0
+        print(f"    cuda:{i}  {counts[i]:>4} tensors  {alloc:5.1f} GB")
+    if len(counts) <= 2:
+        print("    !!! only %d GPU(s) hold weights — pass --device-map balanced_low_0 "
+              "(weights packed front-first will OOM on long prefill)." % len(counts))
+
+
 def _free_cuda():
     """Drop dead tensors and return their CUDA blocks to the allocator. Called between
     captures and cells so a long document's KV cache (several GB at 32k) does not
@@ -486,6 +505,13 @@ def main():
                         help="comma-separated logical GPU indices to shard the 70B "
                              "across; default = ALL visible GPUs. More shards → lower "
                              "per-GPU memory, which is what lets 32k prefill fit.")
+    parser.add_argument("--device-map", default="balanced_low_0",
+                        help="how to place layers across GPUs. 'balanced_low_0' spreads "
+                             "evenly and keeps GPU 0 light (needed for long prefill); "
+                             "'sequential' packs front GPUs first (only ~2 GPUs used for "
+                             "a 70B — the cause of 32k OOM).")
+    parser.add_argument("--max-mem-per-gpu", default="70GiB",
+                        help="per-GPU memory cap handed to accelerate when sharding")
     parser.add_argument("--reasoning", action="store_true",
                         help="let R1 emit <think> traces instead of suppressing them")
     args = parser.parse_args()
@@ -515,8 +541,11 @@ def main():
         devices = tuple(range(torch.cuda.device_count()))   # use every visible GPU
         if not devices:
             raise RuntimeError("no CUDA devices visible — set CUDA_VISIBLE_DEVICES")
-    print(f"  sharding DeepSeek-70B across {len(devices)} GPU(s): {devices}")
-    tok, model = load_deepseek(cfg, devices=devices)
+    print(f"  sharding DeepSeek-70B across {len(devices)} GPU(s): {devices}  "
+          f"(device_map={args.device_map})")
+    tok, model = load_deepseek(cfg, devices=devices, device_map=args.device_map,
+                               max_memory_per_gpu=args.max_mem_per_gpu)
+    _report_gpu_placement(model)
 
     print(f"\n########## PROOF 4 — length scaling (stage={args.stage}) ##########")
     print(f"  lengths={lengths}  depths={depths}  layers={layers}")

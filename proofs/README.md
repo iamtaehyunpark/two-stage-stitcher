@@ -119,14 +119,19 @@ The headline is **recall vs length**; the verdict (`HOLDS_AT_LENGTH` /
 inject-all-N staying ≥ 0.8 as length grows.
 
 **Memory at length.** By default the 70B is sharded across **every visible GPU**
-(`--gpus` to restrict) — more shards means lower per-GPU memory, which is what lets the
-32k full-prefill (Condition A / the filler gate) fit; on 8×A100-80GB it has ample
-headroom. The runner also frees each document's KV cache before the next capture/prefill
-and sets `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` to fight fragmentation. If you
-still OOM at the longest length, add more GPUs or drop the top length. `--max-doc-tokens`
-(default 40000) is the truncation cap for capture/prefill — keep it above your longest
-length (and under the model's 128k context). The static filler selftest runs first
-(`python proofs/long_context_docs.py`); the behavioural inertness gate runs per cell.
+(`--gpus` to restrict) with `device_map=balanced_low_0`, which spreads the layers
+**evenly** and keeps GPU 0 lightest. This matters: the old `sequential` map fills each
+GPU to its cap before using the next, so a ~140 GB bf16 70B packs into the **first two**
+80 GB GPUs and leaves GPU 0 no room for the 32k prefill's activation — the cause of the
+OOM. On launch the runner prints the per-GPU layer/memory placement so you can confirm
+all GPUs are loaded (if only ≤2 are, it warns). It also frees each document's KV cache
+before the next capture/prefill and sets
+`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` to fight fragmentation. Still OOM at
+the top length? Add GPUs, drop a per-GPU cap with `--max-mem-per-gpu`, or trim the top
+length. `--max-doc-tokens` (default 40000) is the truncation cap for capture/prefill —
+keep it above your longest length (and under the model's 128k context). The static filler
+selftest runs first (`python proofs/long_context_docs.py`); the behavioural inertness
+gate runs per cell.
 
 ## What each rung decides
 
