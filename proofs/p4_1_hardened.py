@@ -131,18 +131,30 @@ def first_clause(answer: str) -> str:
     return parts[0] if parts else line.strip()
 
 
-def score_lenient(answer: str, gold: str) -> bool:
-    return normalize(gold) in normalize(answer)
+# A fact may have several acceptable surface forms (`alt` in fact_bank) — e.g. a
+# spelled-out number gold "ninety-eight feet" and the digit form "98 feet" the model is
+# just as likely to produce. Scoring against ANY accepted form removes a pure
+# word-vs-digit format mismatch from being read as a wrong answer; without it a correct
+# digit reply fails the gate and the fact is silently dropped (the A-unanswerable
+# disqualifications seen at n=28).
+def _golds(gold, alts):
+    return [gold] + list(alts or [])
 
 
-def score_firstline(answer: str, gold: str) -> bool:
-    return normalize(gold) in normalize(first_clause(answer))
+def score_lenient(answer: str, gold: str, alts=()) -> bool:
+    a = normalize(answer)
+    return any(normalize(g) in a for g in _golds(gold, alts))
 
 
-def score_strict(answer: str, gold: str, decoys=()) -> bool:
-    """Gold in the answer clause, no decoy value in it, no negation/hedge cue."""
+def score_firstline(answer: str, gold: str, alts=()) -> bool:
     clause = normalize(first_clause(answer))
-    if normalize(gold) not in clause:
+    return any(normalize(g) in clause for g in _golds(gold, alts))
+
+
+def score_strict(answer: str, gold: str, decoys=(), alts=()) -> bool:
+    """An accepted form in the answer clause, no decoy value in it, no negation/hedge."""
+    clause = normalize(first_clause(answer))
+    if not any(normalize(g) in clause for g in _golds(gold, alts)):
         return False
     if any(normalize(d) in clause for d in decoys):
         return False
@@ -154,10 +166,10 @@ def score_strict(answer: str, gold: str, decoys=()) -> bool:
 SCORERS = ["lenient", "firstline", "strict"]
 
 
-def score_all(answer: str, gold: str, decoys=()) -> dict:
-    return {"lenient": score_lenient(answer, gold),
-            "firstline": score_firstline(answer, gold),
-            "strict": score_strict(answer, gold, decoys)}
+def score_all(answer: str, gold: str, decoys=(), alts=()) -> dict:
+    return {"lenient": score_lenient(answer, gold, alts),
+            "firstline": score_firstline(answer, gold, alts),
+            "strict": score_strict(answer, gold, decoys, alts)}
 
 
 # ── think-mode control ─────────────────────────────────────────────────────────
@@ -200,7 +212,7 @@ def _gates_for_cell(model, tok, doc, filler, base, mnt, max_doc_tokens, c_cache)
     three gate booleans (lenient). C (no-context) is cached across cells by question."""
     items = []
     for qa in base["qa"]:
-        q, gold = qa["q"], qa["a"]
+        q, gold, alts = qa["q"], qa["a"], qa.get("alt", [])
         if q in c_cache:
             c = c_cache[q]
         else:
@@ -208,10 +220,13 @@ def _gates_for_cell(model, tok, doc, filler, base, mnt, max_doc_tokens, c_cache)
             c_cache[q] = c
         a = ans_A(model, tok, doc["text"], q, mnt, max_doc_tokens)
         cf = ans_A(model, tok, filler["text"], q, mnt, max_doc_tokens)
-        c_ok, cf_ok, a_ok = score_lenient(c, gold), score_lenient(cf, gold), score_lenient(a, gold)
+        c_ok = score_lenient(c, gold, alts)
+        cf_ok = score_lenient(cf, gold, alts)
+        a_ok = score_lenient(a, gold, alts)
         idx = span_token_positions(tok, doc["text"], qa["needle"], max_doc_tokens)
-        items.append({"q": q, "gold": gold, "needle_idx": idx,
+        items.append({"q": q, "gold": gold, "alts": alts, "needle_idx": idx,
                       "c_ok": c_ok, "cf_ok": cf_ok, "a_ok": a_ok,
+                      "a_ans": a[:90],   # kept for diagnosing A-unanswerable disqualifications
                       "gated": (not c_ok) and (not cf_ok) and a_ok})
     return items
 
@@ -257,8 +272,9 @@ def run(model, tok, args):
                                     args.max_doc_tokens, c_cache)
             for it in items:
                 gate_rows.append({"arm": "main", "doc": name, "depth": depth,
-                                  "question": it["q"], "c_ok": it["c_ok"],
-                                  "cf_ok": it["cf_ok"], "a_ok": it["a_ok"],
+                                  "question": it["q"], "gold": it["gold"],
+                                  "c_ok": it["c_ok"], "cf_ok": it["cf_ok"],
+                                  "a_ok": it["a_ok"], "a_ans": it["a_ans"],
                                   "gated": it["gated"]})
             gated = [it for it in items if it["gated"]]
             print(f"   gated {len(gated)}/{len(items)} "
@@ -289,9 +305,10 @@ def run(model, tok, args):
                       f"{'OK' if a_sub.strip() == a_full.strip() else 'MISMATCH'}")
 
             for it in gated:
-                q, gold, idx = it["q"], it["gold"], it["needle_idx"]
+                q, gold, idx, alts = it["q"], it["gold"], it["needle_idx"], it["alts"]
                 rec = {"arm": "main", "doc": name, "depth": depth, "question": q,
-                       "gold": gold, "k_needle": len(idx), "answers": {}, "scores": {}}
+                       "gold": gold, "alts": alts, "k_needle": len(idx),
+                       "answers": {}, "scores": {}}
                 for mode in modes:
                     _set_think(mode)
                     m = mnt if mode == "off" else tmnt
@@ -306,7 +323,7 @@ def run(model, tok, args):
                             q, layer, m)
                     for cond, ans in outs.items():
                         rec["answers"][f"{cond}@{mode}"] = ans
-                        rec["scores"][f"{cond}@{mode}"] = score_all(ans, gold, decoys)
+                        rec["scores"][f"{cond}@{mode}"] = score_all(ans, gold, decoys, alts)
                 records.append(rec)
                 if len(eyeball) < 5:
                     eyeball.append({"doc": name, "q": q, "gold": gold,
@@ -345,8 +362,9 @@ def run(model, tok, args):
                                         args.max_doc_tokens, c_cache)
                 for it in items:
                     gate_rows.append({"arm": "dec", "doc": name, "depth": depth,
-                                      "question": it["q"], "c_ok": it["c_ok"],
-                                      "cf_ok": it["cf_ok"], "a_ok": it["a_ok"],
+                                      "question": it["q"], "gold": it["gold"],
+                                      "c_ok": it["c_ok"], "cf_ok": it["cf_ok"],
+                                      "a_ok": it["a_ok"], "a_ans": it["a_ans"],
                                       "gated": it["gated"]})
                 gated = [it for it in items if it["gated"]]
                 print(f"   gated {len(gated)}/{len(items)}")
@@ -355,18 +373,18 @@ def run(model, tok, args):
                 cache, _Y, n_doc = capture_doc_cache(model, ids, layer); del _Y
                 _set_think("off")
                 for it in gated:
-                    q, gold, idx = it["q"], it["gold"], it["needle_idx"]
+                    q, gold, idx, alts = it["q"], it["gold"], it["needle_idx"], it["alts"]
                     kept = kept_indices(n_doc, idx, args.dec_keep_rate, "strided",
                                         "needle_protected", seed=0, keep_sink=True)
                     a_txt = ans_A(model, tok, decimated_text(tok, ids, kept), q, mnt,
                                   args.max_doc_tokens)
                     a_lat = inject_answer_subset(model, tok, cache, n_doc, kept, q, layer, mnt)
                     rec = {"arm": "dec", "doc": name, "depth": depth, "question": q,
-                           "gold": gold, "kept_count": len(kept),
+                           "gold": gold, "alts": alts, "kept_count": len(kept),
                            "keep_rate": args.dec_keep_rate,
                            "answers": {"dec_text@off": a_txt, "dec_latent@off": a_lat},
-                           "scores": {"dec_text@off": score_all(a_txt, gold, decoys),
-                                      "dec_latent@off": score_all(a_lat, gold, decoys)}}
+                           "scores": {"dec_text@off": score_all(a_txt, gold, decoys, alts),
+                                      "dec_latent@off": score_all(a_lat, gold, decoys, alts)}}
                     dec_records.append(rec)
                     print(f"     [{name}|d{depth}] {q[:42]!r}  "
                           f"text={rec['scores']['dec_text@off']['strict']} "
@@ -502,6 +520,16 @@ def report(result, agg):
               f"filler-leak {d['disq_filler_leak']}, A-unanswerable {d['disq_a_unanswerable']} "
               f"(of {d['items']})")
 
+    # Show WHY any A-unanswerable items fell out — gold vs what A actually said. This is
+    # how you tell a real retrieval failure from a scoring-format mismatch (e.g. the
+    # model answering a number in digits when the gold is spelled out).
+    bad = [r for r in result.get("gate_rows", []) if not r["a_ok"]]
+    if bad:
+        print("  A-unanswerable detail (gold → A said):")
+        for r in bad[:12]:
+            print(f"    [{r['doc']}|d{r['depth']}] gold={r.get('gold')!r} → "
+                  f"{(r.get('a_ans') or '')[:70]!r}")
+
     cols = [(s, m) for m in modes for s in SCORERS]
     head = "  " + f"{'condition':<18}" + "".join(f"{s[:4]+'/'+m:>12}" for s, m in cols)
     print("\n" + head)
@@ -552,11 +580,12 @@ def _fmt(v):
 
 def rescore(result):
     """Re-apply the CURRENT scorers to a saved run's raw answers — no model, no GPU.
-    Each record's decoys are looked up by its own doc (dec-arm coreference docs carry
-    none), so a pooled multi-doc run re-scores correctly."""
+    Decoys and accepted answer forms (alts) are taken per record (by doc / from the
+    stored `alts`), so a pooled multi-doc run re-scores correctly."""
     for rec in result.get("records", []):
         decoys = DECOY_VALUES.get(rec.get("doc"), ())
-        rec["scores"] = {key: score_all(ans, rec["gold"], decoys)
+        alts = rec.get("alts", [])
+        rec["scores"] = {key: score_all(ans, rec["gold"], decoys, alts)
                          for key, ans in rec.get("answers", {}).items()}
     return result
 
