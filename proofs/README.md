@@ -139,8 +139,10 @@ is almost too clean, so before Proof 5 we re-test the single most stressful poin
 ([`p4_1_hardened.py`](p4_1_hardened.py)):
 
 - **strict scoring** — report `lenient` (containment), `firstline` (gold in the answer
-  clause), and `strict` (the clause *is* the gold) side by side; the lenient−strict
-  delta is the inflation.
+  clause), and `strict` (gold in the clause, **exclusively** — no competing decoy value,
+  no negation/hedge) side by side; the lenient−strict delta is the inflation. Strict is
+  the scorer the distractors make meaningful: "Velloth, not Vask" or "either Velloth or
+  Vask" fails it, a clean correct sentence passes.
 - **capture/A symmetry** — `inject_docnaive` (document-only capture) vs `inject_qfair`
   (capture inside the same instruction+document framing A sees); honest ceiling
   comparison is `inject_qfair` vs `A`.
@@ -154,7 +156,12 @@ is almost too clean, so before Proof 5 we re-test the single most stressful poin
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python proofs/p4_1_hardened.py \
     --doc zorvian_codex --length 32000 --layer 12 --out proofs/data/p4_1.json
 # --no-think-on to skip the slow reasoning arm
+# re-score a saved run with the current scorers (no model, no GPU — iterate scorers free):
+python proofs/p4_1_hardened.py --rescore proofs/data/p4_1.json
 ```
+
+The raw per-condition answers are saved in `p4_1.json`, so `--rescore` regenerates the
+whole table without re-running the 32k generation.
 
 Sanity gates run first (subset-to-all no-op; C/C_filler must fail *with* distractors; 5
 raw injected answers printed for eyeball). The number to read first is
