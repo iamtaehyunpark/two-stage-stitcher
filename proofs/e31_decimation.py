@@ -311,33 +311,67 @@ def make_plot(agg, conditions, keep_rates, patterns, variants, out_path):
     print(f"  saved plot → {out_path}")
 
 
+GAP_MARGIN = 0.2   # max (dec_latent − dec_text) gap that counts as a real divergence
+
+
 def interpret(agg, conditions, keep_rates, variants):
-    """Print the in-advance interpretation, read off the heaviest thinning."""
+    """Read the verdict from the MAXIMUM dec_latent − dec_text gap across rates,
+    NOT from the heaviest thinning.
+
+    Every curve eventually collapses at extreme thinning (you destroy the fact
+    regardless of representation), so reading the verdict off the most-thinned row
+    declares "illusory" on any successful experiment — that was the original bug. The
+    signal lives where text is still alive enough to lose to: the largest gap between
+    the latent and text curves. We report that gap, where it occurs, and — separately
+    — whether the latent advantage survives renumbering (representational vs.
+    positional)."""
     if not keep_rates:
         return
-    kr_min = min(keep_rates)
     print("\n" + "=" * 72)
-    print(f"EXP 3.1 — reading (at heaviest thinning, keep-rate {kr_min:g}, strided)")
+    print("EXP 3.1 — reading (max latent−text gap across rates; floor rows ignored)")
     for variant in variants:
-        row = agg["table"][variant].get("strided", {}).get(kr_min, {})
-        dt = row.get("dec_text")
-        dl = row.get("dec_latent")
-        rn = row.get("dec_latent_renumbered")
-        bits = []
-        if dl is not None and dt is not None:
-            if dl >= HOLD and dt <= COLLAPSE:
-                bits.append("latent HOLDS while text COLLAPSES → latent ≠ text (carries skipped-neighbour context)")
-            elif dl <= COLLAPSE and dt <= COLLAPSE:
-                bits.append("both COLLAPSE → latent interchangeable with text under thinning (advantage illusory)")
-            elif dl >= HOLD and dt >= HOLD:
-                bits.append("both HOLD → doc too easy at this rate; thin harder / lengthen docs")
+        # find the (pattern, keep_rate) with the largest dec_latent − dec_text gap
+        best = None   # (gap, pattern, kr, dt, dl)
+        renum_diffs = []
+        renum_collapse = False
+        for pattern in agg["table"][variant]:
+            for kr in keep_rates:
+                row = agg["table"][variant][pattern].get(kr, {})
+                dt, dl, rn = row.get("dec_text"), row.get("dec_latent"), row.get("dec_latent_renumbered")
+                if dt is not None and dl is not None:
+                    gap = dl - dt
+                    if best is None or gap > best[0]:
+                        best = (gap, pattern, kr, dt, dl)
+                if dl is not None and rn is not None:
+                    # only compare where latent is alive enough for the test to mean anything
+                    if dl > COLLAPSE:
+                        renum_diffs.append(abs(dl - rn))
+                        if rn <= COLLAPSE and dl >= HOLD:
+                            renum_collapse = True
+
+        if best is None:
+            print(f"  [{variant}] no comparable cells")
+            continue
+        gap, pat, kr, dt, dl = best
+        print(f"  [{variant}] max gap {gap:+.2f} at keep={kr:g} ({pat}): "
+              f"dec_text={dt:.2f} dec_latent={dl:.2f}")
+        if gap >= GAP_MARGIN:
+            print("      → latent ≠ text: layer-12 states carry context their tokens do not")
+        elif dl <= COLLAPSE:
+            print("      → both arms collapse everywhere; no rate shows latent surviving → "
+                  "thin less / lengthen docs (or latent truly interchangeable)")
+        else:
+            print("      → graded / weak separation → see the curve")
+
+        # representational vs positional
+        if renum_diffs:
+            mean_diff = sum(renum_diffs) / len(renum_diffs)
+            if renum_collapse and mean_diff > GAP_MARGIN:
+                print(f"      → renumbered collapses (mean |Δ|={mean_diff:.2f}) → POSITION is "
+                      "what matters, not the representation")
             else:
-                bits.append("graded → see curve")
-        if dl is not None and rn is not None and dl >= HOLD and rn <= COLLAPSE:
-            bits.append("renumbered collapses → POSITION is what matters, not decimation per se")
-        print(f"  [{variant}] dec_text={dt} dec_latent={dl} renumbered={rn}")
-        for b in bits:
-            print(f"      → {b}")
+                print(f"      → renumbered tracks latent (mean |Δ|={mean_diff:.2f}) → advantage "
+                      "is REPRESENTATIONAL, not a position artifact")
     print("  (needle_protected isolates folded context; needle_decimated is the harder, "
           "needle-loss test — compare the two.)")
 

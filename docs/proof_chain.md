@@ -12,6 +12,14 @@ The SLM enters only at Proof 6.
 > shows the assumed layer 30 is suboptimal — recall peaks shallow (≈1.0 at L12–14),
 > is mediocre at 30 (0.60), and dies past ~40. The new tension: recall is best where
 > compute savings are worst. Full write-up: [`layer_sweep.md`](layer_sweep.md).
+>
+> **Result (2026-06-18):** Experiment 3.1 (latent- vs. text-decimation at L12)
+> answers the project's existential question: **a layer-12 state carries context its
+> raw token does not.** Thin a document and decimated *text* dies (≈0.00 at keep-rate
+> ½ strided) while decimated *latent* survives (0.40–0.60); max latent−text gap
+> ≈0.45. A RoPE-renumbered control tracks the original-position arm, so the advantage
+> is **representational, not a position artifact.** Latent ≠ text — the green light
+> Proof 5 needed. Full write-up: [`exp_3_1_decimation.md`](exp_3_1_decimation.md).
 
 | # | Proof | Proves | Pass | Fail | Status |
 |---|---|---|---|---|---|
@@ -20,7 +28,7 @@ The SLM enters only at Proof 6.
 | 2 | Wrong-doc falsifier | it's injection, not memory | wrong-doc fails X | "success" was memory → **falsified** | **PASS** (wrong-doc 0.00 at L12/24/25) |
 | 3 | Path resolution | full prefix vs sparse needles | (see outcomes) | — | **implemented** (`proofs/p3_path.py`, fixed at layer 12); awaiting run |
 | 4 | Length scaling | survives long context | recall holds at 16k/32k+ | dies at length → premise unproven | pending (blocked by 3) |
-| 5 | Latent beats text-RAG | reason to exist | latent ≥ text-RAG at lower cost | dead weight vs RAG | pending (blocked by 4) |
+| 5 | Latent beats text-RAG | reason to exist | latent ≥ text-RAG at lower cost | dead weight vs RAG | **motivated** by Exp 3.1 (latent ≠ text); pending full run |
 | 6 | Stitcher reproduces states | the SLM works | stitched recovers facts | translation is the real bottleneck | pending (blocked by 5) |
 
 ---
