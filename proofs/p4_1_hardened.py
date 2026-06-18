@@ -34,16 +34,30 @@ one length, one layer, one depth, many hardenings.
       reasoning. We add a think-ON arm (parse post-</think>, count an unclosed think as
       no-answer) for A / inject_docnaive / inject_qfair — the path Proof 5 will use.
 
-The number to look at first is dec_latent − dec_text under STRICT scoring WITH
-distractors: if the Exp-3.1 mechanism (latent carries what text loses) survives the
+To have the power to resolve these effects (the first run had only n=3 gated, which
+can't separate a 33% difference), the cell is POOLED over all distractor-banked docs ×
+several needle depths — Proof 4 showed depth is inert, so these are independent
+retrieval instances, not a confound. Two arms, reported separately:
+  • discrimination arm (A / inject_docnaive / inject_qfair / needles_only) on the
+    answer-in-needle synthetic docs WITH distractors — the honest ceiling comparison.
+  • latent-vs-text arm on the Exp-3.1 COREFERENCE docs (answer in the decimatable
+    surroundings) thinned to the keep-rate where dec_text COLLAPSES — the only setting
+    where latent>text is a meaningful claim. The verdict refuses to read the gap unless
+    text actually collapsed, and refuses to claim parity below n ≥ 30.
+
+The number to look at first is dec_latent − dec_text under STRICT scoring on the
+collapse arm: if the Exp-3.1 mechanism (latent carries what text loses) survives the
 hardest, fairest test, nothing else in the table can sink the project.
 
 Usage:
     CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python proofs/p4_1_hardened.py \
-        --doc zorvian_codex --length 32000 --layer 12 --depth 0.5 \
-        --out proofs/data/p4_1.json
-    # skip the (slow) think-on arm:
-    ... python proofs/p4_1_hardened.py --no-think-on
+        --length 32000 --layer 12 --depths 0.1,0.5,0.9 --out proofs/data/p4_1.json
+    # faster first look: one depth, no think-on, skip the dec arm
+    ... python proofs/p4_1_hardened.py --depths 0.5 --no-think-on --no-dec
+    # if dec_text doesn't collapse, thin harder:
+    ... python proofs/p4_1_hardened.py --dec-keep-rate 0.25
+    # re-score a saved run with the current scorers (no GPU):
+    ... python proofs/p4_1_hardened.py --rescore proofs/data/p4_1.json
 """
 
 import os
@@ -67,7 +81,17 @@ from proofs.common import (
 from proofs.needles import span_token_positions, needle_positions
 from proofs.decimate import kept_indices, decimated_text
 from proofs.long_context_docs import build_distractor_doc, selftest_filler
-from proofs.synthetic_docs import doc_by_name
+from proofs.synthetic_docs import SYNTHETIC_DOCS, doc_by_name
+from proofs.synthetic_docs_long import SYNTHETIC_DOCS_LONG
+
+# Proof 4.1 power / mechanism thresholds. P41_MIN_N is the gated-item floor below which
+# a "parity" claim is over-reading noise (the n=3 trap). COLLAPSE/GAP mirror Exp 3.1:
+# the dec arm only INFORMS the latent>text claim if text actually collapsed (dec_text ≤
+# COLLAPSE); a real advantage means dec_latent − dec_text ≥ GAP.
+P41_MIN_N = 30
+DEC_MIN_N = 8
+COLLAPSE = 0.3
+GAP = 0.2
 
 
 # ── the A-prompt split, for the capture/A-symmetry (Hardening 2) ───────────────
@@ -100,6 +124,48 @@ DISTRACTORS = {
         "An old rumor maintains the work was recovered by Dalen Roost and first entered "
         "the catalogues in the year 1450.",
     ],
+    "harnel_engine": [
+        "Some manuals claim the Harnel rotary engine was designed in 1949 by the "
+        "engineer Corvin Thale for the airship Meridian.",
+        "A persistent rumor holds that it produced 2,460 horsepower and burned a fuel "
+        "known as red kerosene.",
+        "According to one trade circular, Pendran's compression arrangement was patented "
+        "as the Halvard coil.",
+        "It is sometimes said the Calistra completed 388 transcontinental flights before "
+        "it was retired.",
+        "An old catalogue lists the last surviving unit at the Dunmore Gallery rather "
+        "than any institute.",
+    ],
+    "marsh_of_olden": [
+        "Some chronicles assert the Marsh of Olden has been governed since 1559 by the "
+        "Tarn League, an assembly of seven elected stewards.",
+        "A competing account names its largest settlement as Wyhaven, built upon timber "
+        "pilings above the tide.",
+        "It is occasionally claimed the marsh is prized for the silverback carp, taken "
+        "only in the deep winter.",
+        "One disputed history credits the great levee to the architect Brannon Vesk.",
+        "An old rumor holds the governing body numbered eleven members in its earliest "
+        "years.",
+    ],
+    "tovic_protocol": [
+        "Some sources insist the Tovic Protocol was established in 1689 by the "
+        "cartographer Doran Mell for crossing the Ashen Strait.",
+        "A rival tradition holds that convoys were limited to no more than eight vessels.",
+        "According to one disputed log, each ship carried a marker lantern called a "
+        "fenlight.",
+        "It is occasionally claimed the lost merchant fleet Brae went down with 97 crew "
+        "aboard.",
+        "An old chart attributes the original survey to the navigator Ives Calder.",
+    ],
+    "ostrenko_accord": [
+        "Some histories claim the Ostrenko Accord was brokered in 1801 by the merchant "
+        "Garrin Vole between Davmoor and Tenley.",
+        "A competing record sets the tariff on smoked rivergrain at seven percent.",
+        "It is sometimes said the three arbiters were known instead as the Ashcloaks.",
+        "One disputed ledger holds that the agreement collapsed in 1888 after a flood.",
+        "An old rumor maintains the shared mint stood on the islet of Renn rather than "
+        "Cawl.",
+    ],
 }
 
 
@@ -122,6 +188,13 @@ DECOY_VALUES = {
     "zorvian_codex": ["Toren Vask", "1602", "Antial", "Esca Morrow", "2118",
                       "Halvard Crane", "1889", "Sela Brunn", "4000", "Dalen Roost",
                       "1450"],
+    "harnel_engine": ["Corvin Thale", "1949", "Meridian", "2460", "red kerosene",
+                      "Halvard coil", "388", "Dunmore"],
+    "marsh_of_olden": ["Tarn League", "1559", "seven", "Wyhaven", "silverback carp",
+                       "Brannon Vesk", "eleven"],
+    "tovic_protocol": ["Doran Mell", "1689", "eight", "fenlight", "97", "Ives Calder"],
+    "ostrenko_accord": ["Garrin Vole", "1801", "seven percent", "Ashcloaks", "1888",
+                        "Renn"],
 }
 
 # Cues that the clause negates / hedges / declines the answer — disqualify strict even
@@ -190,195 +263,328 @@ def ans_qfair(model, tok, qcache, n_pre, q, layer, max_new_tokens):
     return final_answer(txt)
 
 
-# ── main evaluation ────────────────────────────────────────────────────────────
-def run(model, tok, args):
-    base = doc_by_name(args.doc)
-    distractors = DISTRACTORS.get(args.doc)
-    decoys = DECOY_VALUES.get(args.doc, [])
-    if not distractors:
-        raise SystemExit(f"no distractor bank authored for doc {args.doc!r} — add one "
-                         "to DISTRACTORS before running Proof 4.1 on it.")
+# ── per-cell helpers ───────────────────────────────────────────────────────────
+def _free_cuda():
+    import gc
+    import torch
+    gc.collect()
+    if torch.cuda.is_available():
+        for i in range(torch.cuda.device_count()):
+            with torch.cuda.device(i):
+                torch.cuda.empty_cache()
 
-    # No distractor may contain a true gold (else it stops being a near-MISS).
-    for qa in base["qa"]:
-        for d in distractors:
-            assert normalize(qa["a"]) not in normalize(d), \
-                f"distractor leaks gold {qa['a']!r}: {d!r}"
 
-    layer, mnt = args.layer, args.max_new_tokens
-    tmnt = args.think_max_new_tokens
-    modes = ["off"] if args.no_think_on else ["off", "on"]
-
-    # Build the 32k distractor document (with fact) and its filler-only twin (distractors
-    # remain, fact removed) — the C_filler-with-distractors gate.
-    doc = build_distractor_doc(tok, base, args.length, args.depth, distractors,
-                               max_doc_tokens=args.max_doc_tokens)
-    filler = build_distractor_doc(tok, base, args.length, args.depth, distractors,
-                                  max_doc_tokens=args.max_doc_tokens, drop_fact=True)
-    print(f"\nbuilt {args.doc}: {doc['n_tokens']} tok, fact@depth={doc['depth_actual']}, "
-          f"{doc['n_distractors']} distractors  (filler-only twin: {filler['n_tokens']} tok)")
-
-    # Tokenize once: ids drive the capture and the text-decimation arm.
-    ids = tok(doc["text"], return_tensors="pt", truncation=True,
-              max_length=args.max_doc_tokens).input_ids
-
-    # Needle positions per question (true needle only; decoys have different wording).
-    for qa in base["qa"]:
-        qa["needle_idx"] = span_token_positions(tok, doc["text"], qa["needle"],
-                                                args.max_doc_tokens)
-
-    # ── captures (document-only and q-fair) ───────────────────────────────────
-    print(f"capturing docnaive cache @ layer {layer} ({doc['n_tokens']} tok) …")
-    cache, _Y, n_doc = capture_doc_cache(model, ids, layer)
-    del _Y
-
-    pre_text = PREFILL_PREFIX.format(document=doc["text"])
-    pre_ids = tok(pre_text, return_tensors="pt", truncation=True,
-                  max_length=args.max_doc_tokens).input_ids
-    print(f"capturing q-fair cache @ layer {layer} ({pre_ids.shape[1]} tok, "
-          "instruction+document framing) …")
-    qcache, _Yq, n_pre = capture_doc_cache(model, pre_ids, layer)
-    del _Yq
-
-    # ── SANITY GATES (run + eyeball before trusting anything) ─────────────────
-    _set_think("off")
-    print("\n" + "=" * 64)
-    print("SANITY GATES")
-    # 1. subset-to-all no-op: inject all positions == full inject (bookkeeping check)
-    canary_mismatch = 0
-    for qa in base["qa"]:
-        kept_all = kept_indices(n_doc, qa["needle_idx"], 1.0, "strided",
-                                "needle_decimated", seed=0, keep_sink=True)
-        a_sub = inject_answer_subset(model, tok, cache, n_doc, kept_all, qa["q"],
-                                     layer, mnt)
-        a_full = inject_answer(model, tok, cache, n_doc, qa["q"], layer, mnt)
-        if a_sub.strip() != a_full.strip():
-            canary_mismatch += 1
-    print(f"  1. subset-to-all no-op : {'OK' if not canary_mismatch else f'{canary_mismatch} MISMATCH'}"
-          "  (inject-all-positions must equal full inject)")
-
-    # 2/3. C and C_filler must FAIL with distractors present; eyeball 5 raw injects.
-    print("  2. C / C_filler (with distractors) must FAIL (lenient), A must SUCCEED:")
-    gate = {}
+def _gates_for_cell(model, tok, doc, filler, base, mnt, max_doc_tokens, c_cache):
+    """Per-question, layer-independent gates for one built cell (with distractors when
+    the doc carries them). Returns one item per QA with its needle positions and the
+    three gate booleans (lenient). C (no-context) is cached across cells by question."""
+    items = []
     for qa in base["qa"]:
         q, gold = qa["q"], qa["a"]
-        c = no_context_answer(model, tok, q, mnt)
-        cf = ans_A(model, tok, filler["text"], q, mnt, args.max_doc_tokens)
-        a = ans_A(model, tok, doc["text"], q, mnt, args.max_doc_tokens)
+        if q in c_cache:
+            c = c_cache[q]
+        else:
+            c = no_context_answer(model, tok, q, mnt)
+            c_cache[q] = c
+        a = ans_A(model, tok, doc["text"], q, mnt, max_doc_tokens)
+        cf = ans_A(model, tok, filler["text"], q, mnt, max_doc_tokens)
         c_ok, cf_ok, a_ok = score_lenient(c, gold), score_lenient(cf, gold), score_lenient(a, gold)
-        gated = (not c_ok) and (not cf_ok) and a_ok
-        gate[q] = {"c": c, "c_filler": cf, "a": a, "c_ok": c_ok, "cf_ok": cf_ok,
-                   "a_ok": a_ok, "gated": gated}
-        print(f"     {q!r}\n       C={c_ok} C_filler={cf_ok} A={a_ok}  gated={gated}"
-              f"   C_filler→{first_clause(cf)[:60]!r}")
-    print("  3. eyeball — 5 raw 32k injected (docnaive, think-off) answers vs gold:")
-    eyeball = []
-    for qa in base["qa"]:
-        a_inj = ans_docnaive(model, tok, cache, n_doc, qa["q"], layer, mnt)
-        eyeball.append({"q": qa["q"], "gold": qa["a"], "answer": a_inj})
-        print(f"     gold={qa['a']!r}\n       inj → {a_inj[:90]!r}")
+        idx = span_token_positions(tok, doc["text"], qa["needle"], max_doc_tokens)
+        items.append({"q": q, "gold": gold, "needle_idx": idx,
+                      "c_ok": c_ok, "cf_ok": cf_ok, "a_ok": a_ok,
+                      "gated": (not c_ok) and (not cf_ok) and a_ok})
+    return items
 
-    gated_qs = [qa for qa in base["qa"] if gate[qa["q"]]["gated"]]
-    print(f"\n  → gated questions (C&C_filler fail, A succeeds): {len(gated_qs)}/{len(base['qa'])}")
 
-    # ── the conditions, every which way, on the gated set ─────────────────────
-    records = []
-    for qa in gated_qs:
-        q, gold, idx = qa["q"], qa["a"], qa["needle_idx"]
-        kept = kept_indices(n_doc, idx, args.keep_rate, "strided", "needle_protected",
-                            seed=0, keep_sink=True)
-        rec = {"question": q, "gold": gold, "k_needle": len(idx),
-               "kept_count": len(kept), "keep_rate": args.keep_rate, "answers": {}, "scores": {}}
+# ── main evaluation: pool the cell over docs × depths, plus the dec arm ─────────
+def run(model, tok, args):
+    layer, mnt, tmnt = args.layer, args.max_new_tokens, args.think_max_new_tokens
+    modes = ["off"] if args.no_think_on else ["off", "on"]
+    depths = [float(x) for x in args.depths.split(",")]
 
-        for mode in modes:
-            _set_think(mode)
-            m = mnt if mode == "off" else tmnt
-            outs = {
-                "A": ans_A(model, tok, doc["text"], q, m, args.max_doc_tokens),
-                "inject_docnaive": ans_docnaive(model, tok, cache, n_doc, q, layer, m),
-                "inject_qfair": ans_qfair(model, tok, qcache, n_pre, q, layer, m),
-            }
-            if mode == "off":
-                # sparse handoff + the latent-vs-text contrast: extraction path only.
-                outs["needles_only"] = inject_answer_subset(
-                    model, tok, cache, n_doc, needle_positions(idx, keep_sink=True),
-                    q, layer, m)
-                outs["dec_text"] = ans_A(
-                    model, tok, decimated_text(tok, ids, kept), q, m, args.max_doc_tokens)
-                outs["dec_latent"] = inject_answer_subset(
-                    model, tok, cache, n_doc, kept, q, layer, m)
-            for cond, ans in outs.items():
-                rec["answers"][f"{cond}@{mode}"] = ans
-                rec["scores"][f"{cond}@{mode}"] = score_all(ans, gold, decoys)
-        records.append(rec)
-        print(f"  scored {q!r}")
+    main_names = ([n.strip() for n in args.docs.split(",")] if args.docs
+                  else list(DISTRACTORS.keys()))
+    for n in main_names:
+        if n not in DISTRACTORS:
+            raise SystemExit(f"no distractor bank for {n!r} — add one to DISTRACTORS.")
+        # no distractor may contain a true gold (else it stops being a near-MISS)
+        base = doc_by_name(n)
+        for d in DISTRACTORS[n]:
+            for qa in base["qa"]:
+                assert normalize(qa["a"]) not in normalize(d), \
+                    f"distractor leaks gold {qa['a']!r}: {d!r}"
 
-    del cache, qcache
+    c_cache, records, gate_rows, eyeball = {}, [], [], []
+    canary_mismatch, canary_checked = 0, 0
+
+    # ───────────── discrimination arm: A / inject_docnaive / inject_qfair ─────────
+    print("\n" + "=" * 64)
+    print(f"DISCRIMINATION ARM — docs={main_names} depths={depths}")
+    for name in main_names:
+        base = doc_by_name(name)
+        distractors, decoys = DISTRACTORS[name], DECOY_VALUES.get(name, [])
+        for depth in depths:
+            doc = build_distractor_doc(tok, base, args.length, depth, distractors,
+                                       max_doc_tokens=args.max_doc_tokens)
+            filler = build_distractor_doc(tok, base, args.length, depth, distractors,
+                                          max_doc_tokens=args.max_doc_tokens, drop_fact=True)
+            ids = tok(doc["text"], return_tensors="pt", truncation=True,
+                      max_length=args.max_doc_tokens).input_ids
+            print(f"\n[main] {name} depth={depth}: {doc['n_tokens']} tok, "
+                  f"fact@{doc['depth_actual']}, {doc['n_distractors']} distractors")
+
+            items = _gates_for_cell(model, tok, doc, filler, base, mnt,
+                                    args.max_doc_tokens, c_cache)
+            for it in items:
+                gate_rows.append({"arm": "main", "doc": name, "depth": depth,
+                                  "question": it["q"], "c_ok": it["c_ok"],
+                                  "cf_ok": it["cf_ok"], "a_ok": it["a_ok"],
+                                  "gated": it["gated"]})
+            gated = [it for it in items if it["gated"]]
+            print(f"   gated {len(gated)}/{len(items)} "
+                  f"(disq C={sum(it['c_ok'] for it in items)} "
+                  f"C_filler={sum(it['cf_ok'] for it in items)} "
+                  f"A_fail={sum(not it['a_ok'] for it in items)})")
+            if not gated:
+                continue
+
+            cache, _Y, n_doc = capture_doc_cache(model, ids, layer); del _Y
+            pre_ids = tok(PREFILL_PREFIX.format(document=doc["text"]),
+                          return_tensors="pt", truncation=True,
+                          max_length=args.max_doc_tokens).input_ids
+            qcache, _Yq, n_pre = capture_doc_cache(model, pre_ids, layer); del _Yq
+
+            # one-time bookkeeping canary: inject-all-positions == full inject
+            if canary_checked == 0:
+                it = gated[0]
+                kept_all = kept_indices(n_doc, it["needle_idx"], 1.0, "strided",
+                                        "needle_decimated", seed=0, keep_sink=True)
+                _set_think("off")
+                a_sub = inject_answer_subset(model, tok, cache, n_doc, kept_all,
+                                             it["q"], layer, mnt)
+                a_full = inject_answer(model, tok, cache, n_doc, it["q"], layer, mnt)
+                canary_mismatch += int(a_sub.strip() != a_full.strip())
+                canary_checked = 1
+                print(f"   canary subset-to-all no-op: "
+                      f"{'OK' if a_sub.strip() == a_full.strip() else 'MISMATCH'}")
+
+            for it in gated:
+                q, gold, idx = it["q"], it["gold"], it["needle_idx"]
+                rec = {"arm": "main", "doc": name, "depth": depth, "question": q,
+                       "gold": gold, "k_needle": len(idx), "answers": {}, "scores": {}}
+                for mode in modes:
+                    _set_think(mode)
+                    m = mnt if mode == "off" else tmnt
+                    outs = {
+                        "A": ans_A(model, tok, doc["text"], q, m, args.max_doc_tokens),
+                        "inject_docnaive": ans_docnaive(model, tok, cache, n_doc, q, layer, m),
+                        "inject_qfair": ans_qfair(model, tok, qcache, n_pre, q, layer, m),
+                    }
+                    if mode == "off":
+                        outs["needles_only"] = inject_answer_subset(
+                            model, tok, cache, n_doc, needle_positions(idx, keep_sink=True),
+                            q, layer, m)
+                    for cond, ans in outs.items():
+                        rec["answers"][f"{cond}@{mode}"] = ans
+                        rec["scores"][f"{cond}@{mode}"] = score_all(ans, gold, decoys)
+                records.append(rec)
+                if len(eyeball) < 5:
+                    eyeball.append({"doc": name, "q": q, "gold": gold,
+                                    "answer": rec["answers"]["inject_docnaive@off"]})
+            del cache, qcache
+            _free_cuda()
+
+    # ───────────── latent-vs-text arm: coreference docs thinned to collapse ───────
+    # Run on the Exp-3.1 coreference docs (answer in the DECIMATABLE surroundings,
+    # needle refers to it by anaphora) at the keep-rate where TEXT collapses. On the
+    # answer-in-needle discrimination docs, needle_protected keeps the answer and text
+    # never fails, so the gap there is meaningless — this is the only arm that can show
+    # latent > text honestly. No distractors here (the thinning is the stress).
+    dec_records = []
+    if not args.no_dec:
+        dec_names = ([n.strip() for n in args.dec_docs.split(",")] if args.dec_docs
+                     else [d["name"] for d in SYNTHETIC_DOCS_LONG])
+        dec_by_name = {d["name"]: d for d in SYNTHETIC_DOCS_LONG}
+        print("\n" + "=" * 64)
+        print(f"LATENT-vs-TEXT ARM — coreference docs={dec_names} "
+              f"keep_rate={args.dec_keep_rate} (strided, needle_protected)")
+        for name in dec_names:
+            base = dec_by_name[name]
+            for depth in depths:
+                doc = build_distractor_doc(tok, base, args.length, depth, [],
+                                           max_doc_tokens=args.max_doc_tokens)
+                filler = build_distractor_doc(tok, base, args.length, depth, [],
+                                              max_doc_tokens=args.max_doc_tokens,
+                                              drop_fact=True)
+                ids = tok(doc["text"], return_tensors="pt", truncation=True,
+                          max_length=args.max_doc_tokens).input_ids
+                print(f"\n[dec ] {name} depth={depth}: {doc['n_tokens']} tok")
+                items = _gates_for_cell(model, tok, doc, filler, base, mnt,
+                                        args.max_doc_tokens, c_cache)
+                for it in items:
+                    gate_rows.append({"arm": "dec", "doc": name, "depth": depth,
+                                      "question": it["q"], "c_ok": it["c_ok"],
+                                      "cf_ok": it["cf_ok"], "a_ok": it["a_ok"],
+                                      "gated": it["gated"]})
+                gated = [it for it in items if it["gated"]]
+                print(f"   gated {len(gated)}/{len(items)}")
+                if not gated:
+                    continue
+                cache, _Y, n_doc = capture_doc_cache(model, ids, layer); del _Y
+                _set_think("off")
+                for it in gated:
+                    q, gold, idx = it["q"], it["gold"], it["needle_idx"]
+                    kept = kept_indices(n_doc, idx, args.dec_keep_rate, "strided",
+                                        "needle_protected", seed=0, keep_sink=True)
+                    a_txt = ans_A(model, tok, decimated_text(tok, ids, kept), q, mnt,
+                                  args.max_doc_tokens)
+                    a_lat = inject_answer_subset(model, tok, cache, n_doc, kept, q, layer, mnt)
+                    rec = {"arm": "dec", "doc": name, "depth": depth, "question": q,
+                           "gold": gold, "kept_count": len(kept),
+                           "keep_rate": args.dec_keep_rate,
+                           "answers": {"dec_text@off": a_txt, "dec_latent@off": a_lat},
+                           "scores": {"dec_text@off": score_all(a_txt, gold, ()),
+                                      "dec_latent@off": score_all(a_lat, gold, ())}}
+                    dec_records.append(rec)
+                    print(f"     [{name}|d{depth}] {q[:42]!r}  "
+                          f"text={rec['scores']['dec_text@off']['strict']} "
+                          f"lat={rec['scores']['dec_latent@off']['strict']}")
+                del cache
+                _free_cuda()
 
     return {
-        "doc": args.doc, "length": args.length, "n_tokens": doc["n_tokens"],
-        "layer": layer, "depth": args.depth, "depth_actual": doc["depth_actual"],
-        "keep_rate": args.keep_rate, "n_distractors": doc["n_distractors"],
-        "modes": modes, "sanity_canary_mismatch": canary_mismatch,
-        "gate": gate, "eyeball": eyeball, "gated_n": len(gated_qs),
-        "records": records,
+        "length": args.length, "layer": layer, "depths": depths,
+        "main_docs": main_names, "modes": modes,
+        "dec_keep_rate": args.dec_keep_rate, "no_dec": args.no_dec,
+        "sanity_canary_mismatch": canary_mismatch,
+        "gate_rows": gate_rows, "eyeball": eyeball,
+        "records": records + dec_records,
     }
 
 
 # ── aggregation + report ────────────────────────────────────────────────────────
-CONDS_BOTH = ["A", "inject_docnaive", "inject_qfair"]
-CONDS_OFF = ["needles_only", "dec_text", "dec_latent"]
+CONDS_MAIN = ["A", "inject_docnaive", "inject_qfair", "needles_only"]
+CONDS_DEC = ["dec_text", "dec_latent"]
+
+
+def _diff(a, b):
+    return None if a is None or b is None else round(a - b, 3)
 
 
 def aggregate(result):
     recs = result["records"]
-    n = len(recs)
     modes = result["modes"]
-    table = {}
+    main = [r for r in recs if r.get("arm") == "main"]
+    dec = [r for r in recs if r.get("arm") == "dec"]
 
-    def rate(cond, mode, scorer):
+    def rate(cond, mode, scorer, pool):
         key = f"{cond}@{mode}"
-        vals = [r["scores"][key][scorer] for r in recs if key in r["scores"]]
+        vals = [r["scores"][key][scorer] for r in pool if key in r.get("scores", {})]
         return round(sum(vals) / len(vals), 3) if vals else None
 
-    for cond in CONDS_BOTH + CONDS_OFF:
-        cond_modes = modes if cond in CONDS_BOTH else ["off"]
-        table[cond] = {m: {s: rate(cond, m, s) for s in SCORERS} for m in cond_modes}
+    table = {}
+    for cond in ["A", "inject_docnaive", "inject_qfair"]:
+        table[cond] = {m: {s: rate(cond, m, s, main) for s in SCORERS} for m in modes}
+    table["needles_only"] = {"off": {s: rate("needles_only", "off", s, main) for s in SCORERS}}
+    for cond in CONDS_DEC:
+        table[cond] = {"off": {s: rate(cond, "off", s, dec) for s in SCORERS}}
 
-    # The headline numbers, computed once.
-    a_strict = table["A"]["off"]["strict"]
-    qfair_strict = table["inject_qfair"]["off"]["strict"]
-    qfair_lenient = table["inject_qfair"]["off"]["lenient"]
+    a_s = table["A"]["off"]["strict"]
+    qf_s = table["inject_qfair"]["off"]["strict"]
+    dn_l = table["inject_docnaive"]["off"]["lenient"]
+    dn_s = table["inject_docnaive"]["off"]["strict"]
     dl = table["dec_latent"]["off"]["strict"]
     dt = table["dec_text"]["off"]["strict"]
     headline = {
-        "qfair_strict_vs_A_strict": (None if a_strict is None or qfair_strict is None
-                                     else round(qfair_strict - a_strict, 3)),
-        "total_slack_lenient_minus_strict_docnaive": (
-            None if table["inject_docnaive"]["off"]["lenient"] is None
-            else round(table["inject_docnaive"]["off"]["lenient"]
-                       - table["inject_docnaive"]["off"]["strict"], 3)),
-        "dec_latent_minus_dec_text_strict": (None if dl is None or dt is None
-                                             else round(dl - dt, 3)),
+        "qfair_strict_vs_A_strict": _diff(qf_s, a_s),
+        "total_slack_lenient_minus_strict_docnaive": _diff(dn_l, dn_s),
+        "dec_latent_minus_dec_text_strict": _diff(dl, dt),
     }
-    return {"n_gated": n, "table": table, "headline": headline}
+    return {
+        "n_main": len(main), "n_dec": len(dec),
+        "distinct_main": len({(r["doc"], r["question"]) for r in main}),
+        "distinct_dec": len({(r["doc"], r["question"]) for r in dec}),
+        "table": table, "headline": headline,
+    }
+
+
+def _gate_diag(result):
+    """Disqualification breakdown per arm: WHY items fell out of gating."""
+    rows = result.get("gate_rows", [])
+    out = {}
+    for arm in ("main", "dec"):
+        a = [r for r in rows if r["arm"] == arm]
+        out[arm] = {
+            "items": len(a), "gated": sum(r["gated"] for r in a),
+            "disq_c_guessable": sum(r["c_ok"] for r in a),
+            "disq_filler_leak": sum(r["cf_ok"] for r in a),
+            "disq_a_unanswerable": sum(not r["a_ok"] for r in a),
+        }
+    return out
+
+
+def _verdicts(agg):
+    """Two honest sub-verdicts — discrimination (A vs inject under strict) and mechanism
+    (latent vs text on the collapse arm) — plus a combined ship/hold. Neither is allowed
+    to claim a result the sample can't support (the n=3 trap), and the mechanism verdict
+    refuses to read a gap when text never collapsed."""
+    t = agg["table"]
+    a_s, qf_s = t["A"]["off"]["strict"], t["inject_qfair"]["off"]["strict"]
+    qf_l = t["inject_qfair"]["off"]["lenient"]
+    dl, dt = t["dec_latent"]["off"]["strict"], t["dec_text"]["off"]["strict"]
+
+    # discrimination
+    if agg["n_main"] < P41_MIN_N:
+        disc = "UNDERPOWERED"
+    elif qf_l is not None and qf_l <= 0.3:
+        disc = "COLLAPSED_UNDER_DISTRACTORS"
+    elif a_s is not None and qf_s is not None and qf_s >= a_s - 0.05:
+        disc = "PARITY_WITH_A"
+    elif qf_l is not None and qf_l >= 0.8 and a_s is not None and qf_s is not None:
+        disc = "RECOVERS_NOT_PARITY"
+    else:
+        disc = "MIXED"
+
+    # mechanism
+    if agg["n_dec"] < DEC_MIN_N or dt is None or dl is None:
+        mech = "UNDERPOWERED_OR_MISSING"
+    elif dt > COLLAPSE:
+        mech = "TEXT_DID_NOT_COLLAPSE"          # uninformative — thin harder
+    elif dl - dt >= GAP:
+        mech = "LATENT_BEATS_TEXT"              # the result that ships
+    elif dl <= COLLAPSE:
+        mech = "LATENT_ALSO_COLLAPSED"          # the threatening outcome
+    else:
+        mech = "WEAK_SEPARATION"
+
+    ship = (disc in ("PARITY_WITH_A", "RECOVERS_NOT_PARITY")
+            and mech == "LATENT_BEATS_TEXT")
+    return {"discrimination": disc, "mechanism": mech,
+            "recommend": "SHIP_TO_PROOF_5" if ship else "HOLD"}
 
 
 def report(result, agg):
     modes = result["modes"]
-    print("\n" + "=" * 78)
-    print(f"PROOF 4.1 — hardened single-point confirmation "
-          f"({result['n_tokens']} tok, L{result['layer']}, depth {result['depth_actual']}, "
-          f"{result['n_distractors']} distractors)")
-    print(f"  gated questions = {agg['n_gated']}   canary mismatches = "
-          f"{result['sanity_canary_mismatch']}  (must be 0)")
+    diag = _gate_diag(result)
+    print("\n" + "=" * 80)
+    print(f"PROOF 4.1 — hardened confirmation ({result['length']} tok, L{result['layer']}, "
+          f"depths={result['depths']})")
+    print(f"  discrimination arm: n={agg['n_main']} gated items from "
+          f"{agg['distinct_main']} distinct facts (target n ≥ {P41_MIN_N})")
+    print(f"  latent-vs-text arm: n={agg['n_dec']} from {agg['distinct_dec']} facts  "
+          f"(keep_rate {result.get('dec_keep_rate')})")
+    print(f"  canary mismatches = {result['sanity_canary_mismatch']} (must be 0)")
+    for arm in ("main", "dec"):
+        d = diag[arm]
+        print(f"  [{arm}] disqualified — C guessable {d['disq_c_guessable']}, "
+              f"filler-leak {d['disq_filler_leak']}, A-unanswerable {d['disq_a_unanswerable']} "
+              f"(of {d['items']})")
 
-    # header
     cols = [(s, m) for m in modes for s in SCORERS]
     head = "  " + f"{'condition':<18}" + "".join(f"{s[:4]+'/'+m:>12}" for s, m in cols)
     print("\n" + head)
     print("  " + "-" * (len(head) - 2))
-    for cond in CONDS_BOTH + CONDS_OFF:
+    for cond in CONDS_MAIN + CONDS_DEC:
         row = f"  {cond:<18}"
         for s, m in cols:
             v = agg["table"][cond].get(m, {}).get(s)
@@ -389,51 +595,33 @@ def report(result, agg):
     print("\n  headline numbers:")
     print(f"    inject_qfair − A  (strict, think-off)        : "
           f"{_fmt(h['qfair_strict_vs_A_strict'])}   (honest ceiling gap; ≈0 ⇒ parity)")
-    print(f"    docnaive lenient − strict (the scorer slack) : "
+    print(f"    docnaive lenient − strict (scorer slack)     : "
           f"{_fmt(h['total_slack_lenient_minus_strict_docnaive'])}")
-    print(f"    dec_latent − dec_text  (strict, distractors) : "
+    print(f"    dec_latent − dec_text  (strict, collapse arm): "
           f"{_fmt(h['dec_latent_minus_dec_text_strict'])}   ← the number that matters most")
 
-    # fixed-in-advance interpretation. Order matters: a task that collapsed under
-    # distractors (easy-task artifact) is checked first; then the one outcome that
-    # threatens the project — latent doing WORSE than text under strict (not merely a
-    # zero gap, which just means text also survived at this keep-rate); then ceiling
-    # parity; then scales-but-not-parity.
-    print("\n  " + "-" * 74)
-    a_s = agg["table"]["A"]["off"]["strict"]
-    qf_s = agg["table"]["inject_qfair"]["off"]["strict"]
-    qf_len = agg["table"]["inject_qfair"]["off"]["lenient"]
-    dl = agg["table"]["dec_latent"]["off"]["strict"]
-    dt = agg["table"]["dec_text"]["off"]["strict"]
-    gap_dl = h["dec_latent_minus_dec_text_strict"]
-    verdict = "SEE_TABLE"
-    if qf_len is not None and qf_len <= 0.3:
-        verdict = "EASY_TASK_ARTIFACT"
-    elif dl is not None and dt is not None and dl + 0.05 < dt:
-        verdict = "MECHANISM_SCORER_INFLATED"        # latent strictly worse than text
-    elif a_s is not None and qf_s is not None and qf_s >= a_s - 0.05:
-        verdict = "VINDICATED_HARDENED"               # parity with the ceiling under strict
-    elif qf_len is not None and qf_len >= 0.8 and qf_s is not None and a_s is not None \
-            and qf_s < a_s - 0.05:
-        verdict = "SCALES_NOT_PARITY"
-    print(f"  VERDICT: {verdict}")
-    if verdict == "VINDICATED_HARDENED":
-        print("   → inject_qfair reaches A under strict scoring WITH distractors, and")
-        print("     dec_latent is not beaten by dec_text. Proof 4 vindicated; ship to Proof 5.")
-    elif verdict == "SCALES_NOT_PARITY":
-        print("   → inject stays well above the floor but below A under strict. Honest and")
-        print("     strong — reframe the claim from 'matches prefill' to 'recovers most of")
-        print("     prefill at a fraction of the cost.'")
-    elif verdict == "EASY_TASK_ARTIFACT":
-        print("   → inject collapses toward C once decoys compete. The 32k 1.00 was an")
-        print("     easy-task artifact; distractor filler must become standard for Proof 4.")
-    elif verdict == "MECHANISM_SCORER_INFLATED":
-        print("   → dec_latent no longer beats dec_text under strict+distractors. The 3.1")
-        print("     mechanism was scorer-inflated — the one outcome that threatens the")
-        print("     project. Investigate before any further build.")
+    v = _verdicts(agg)
+    print("\n  " + "-" * 76)
+    print(f"  discrimination : {v['discrimination']}")
+    print(f"  mechanism      : {v['mechanism']}")
+    print(f"  RECOMMENDATION : {v['recommend']}")
+    if v["recommend"] == "SHIP_TO_PROOF_5":
+        print("   → at n ≥ target, inject reaches A under strict+distractors AND latent")
+        print("     beats collapsed text. Proof 4 hardened and vindicated; ship to Proof 5.")
     else:
-        print("   → read the table; the automatic verdict did not fire cleanly.")
-    return verdict
+        if v["discrimination"] == "UNDERPOWERED":
+            print(f"   → too few gated items (n={agg['n_main']} < {P41_MIN_N}); add docs/"
+                  "depths before reading parity. This is the n=3 guard.")
+        if v["mechanism"] == "TEXT_DID_NOT_COLLAPSE":
+            print("   → dec_text did not collapse; the latent−text gap is not yet")
+            print("     interpretable. Lower --dec-keep-rate until text fails, then re-read.")
+        if v["mechanism"] == "LATENT_ALSO_COLLAPSED":
+            print("   → text collapsed and latent collapsed with it — latent did NOT carry")
+            print("     the folded context. The outcome that threatens the project; investigate.")
+        if v["discrimination"] == "COLLAPSED_UNDER_DISTRACTORS":
+            print("   → inject collapses once decoys compete: the clean recall was an")
+            print("     easy-task artifact. Distractor filler must be standard for Proof 4.")
+    return v
 
 
 def _fmt(v):
@@ -442,10 +630,10 @@ def _fmt(v):
 
 def rescore(result):
     """Re-apply the CURRENT scorers to a saved run's raw answers — no model, no GPU.
-    The expensive part (32k generation) is on disk in result['records'][*]['answers'];
-    this lets the scorer be fixed/iterated for free and the table regenerated."""
-    decoys = DECOY_VALUES.get(result.get("doc"), [])
+    Each record's decoys are looked up by its own doc (dec-arm coreference docs carry
+    none), so a pooled multi-doc run re-scores correctly."""
     for rec in result.get("records", []):
+        decoys = DECOY_VALUES.get(rec.get("doc"), ())
         rec["scores"] = {key: score_all(ans, rec["gold"], decoys)
                          for key, ans in rec.get("answers", {}).items()}
     return result
@@ -456,11 +644,23 @@ def main():
     parser.add_argument("--rescore", default=None, metavar="PATH",
                         help="re-score a saved p4_1.json with the current scorers and "
                              "regenerate the table — no model load. Writes back to --out.")
-    parser.add_argument("--doc", default="zorvian_codex")
+    parser.add_argument("--docs", default=None,
+                        help="comma-separated discrimination docs (default: all with a "
+                             "distractor bank)")
+    parser.add_argument("--depths", default="0.1,0.5,0.9",
+                        help="comma-separated needle depths; pooled to reach n ≥ 30 "
+                             "(Proof 4 showed depth is inert, so these are independent "
+                             "retrieval instances)")
+    parser.add_argument("--dec-docs", default=None,
+                        help="comma-separated coreference docs for the latent-vs-text arm "
+                             "(default: all of synthetic_docs_long)")
+    parser.add_argument("--dec-keep-rate", type=float, default=0.5,
+                        help="keep-rate for the collapse arm (strided, needle_protected); "
+                             "lower it until dec_text collapses")
+    parser.add_argument("--no-dec", action="store_true",
+                        help="skip the latent-vs-text (collapse) arm")
     parser.add_argument("--length", type=int, default=32000)
     parser.add_argument("--layer", type=int, default=12)
-    parser.add_argument("--depth", type=float, default=0.5)
-    parser.add_argument("--keep-rate", type=float, default=0.5)
     parser.add_argument("--max-new-tokens", type=int, default=512,
                         help="generation budget for the think-off arms")
     parser.add_argument("--think-max-new-tokens", type=int, default=2048,
@@ -481,9 +681,9 @@ def main():
             result = json.load(f)
         result = rescore(result)
         agg = aggregate(result)
-        verdict = report(result, agg)
+        v = report(result, agg)
         result["aggregate"] = agg
-        result["verdict"] = verdict
+        result["verdict"] = v
         out = args.out if args.out != "proofs/data/p4_1.json" else args.rescore
         with open(out, "w") as f:
             json.dump(result, f, indent=2, default=str)
@@ -510,12 +710,12 @@ def main():
                                max_memory_per_gpu=args.max_mem_per_gpu)
 
     print(f"\n########## PROOF 4.1 — hardened confirmation "
-          f"({args.length} tok / L{args.layer} / depth {args.depth}) ##########")
+          f"({args.length} tok / L{args.layer}) ##########")
     result = run(model, tok, args)
     agg = aggregate(result)
-    verdict = report(result, agg)
+    v = report(result, agg)
     result["aggregate"] = agg
-    result["verdict"] = verdict
+    result["verdict"] = v
 
     with open(args.out, "w") as f:
         json.dump(result, f, indent=2, default=str)

@@ -133,42 +133,50 @@ keep it above your longest length (and under the model's 128k context). The stat
 selftest runs first (`python proofs/long_context_docs.py`); the behavioural inertness
 gate runs per cell.
 
-**5.1 · Proof 4.1 — hardened single-point confirmation.** Proof 4's 32k recall of 1.00
-is almost too clean, so before Proof 5 we re-test the single most stressful point
-(32k / L12 / depth 0.5) with the evaluation slack removed — one cell, run many ways
+**5.1 · Proof 4.1 — hardened confirmation.** Proof 4's 32k recall of 1.00 is almost too
+clean, so before Proof 5 we re-test the most stressful point (32k / L12) with the
+evaluation slack removed, **pooled over all distractor-banked docs × depths to reach
+n ≥ 30** (the first run had n=3 — too few to resolve a 33% effect)
 ([`p4_1_hardened.py`](p4_1_hardened.py)):
 
-- **strict scoring** — report `lenient` (containment), `firstline` (gold in the answer
-  clause), and `strict` (gold in the clause, **exclusively** — no competing decoy value,
-  no negation/hedge) side by side; the lenient−strict delta is the inflation. Strict is
-  the scorer the distractors make meaningful: "Velloth, not Vask" or "either Velloth or
-  Vask" fails it, a clean correct sentence passes.
+- **strict scoring** — `lenient` (containment), `firstline` (gold in the answer clause),
+  `strict` (gold in the clause **exclusively** — no competing decoy value, no
+  negation/hedge). "Velloth, not Vask" / "either Velloth or Vask" fails strict; a clean
+  correct sentence passes. The lenient−strict delta is the inflation.
 - **capture/A symmetry** — `inject_docnaive` (document-only capture) vs `inject_qfair`
-  (capture inside the same instruction+document framing A sees); honest ceiling
+  (captured inside the same instruction+document framing A sees); honest ceiling
   comparison is `inject_qfair` vs `A`.
-- **distractor filler** — near-miss decoys (same surface form, wrong values) planted at
-  other depths, so a correct answer must *discriminate* the true needle. Re-gated (C and
-  C_filler must still fail, A must still succeed).
-- **reasoning on** — a think-on arm for A / inject (Proof 5's actual path), alongside
-  think-off.
+- **distractor filler** — near-miss decoys (same surface form, wrong values; banks for
+  all 5 docs) woven in at other depths; re-gated (C, C_filler fail; A succeeds), so a
+  correct answer must *discriminate* the true needle.
+- **reasoning on** — a think-on arm for A / inject (Proof 5's actual path).
+
+Two arms, reported separately: the **discrimination arm** above, and a **latent-vs-text
+arm** on the Exp-3.1 coreference docs (answer in the *decimatable* surroundings) thinned
+to the keep-rate where `dec_text` **collapses** — the only setting where latent>text is
+a meaningful claim. The verdict is split into `discrimination` (`PARITY_WITH_A` /
+`RECOVERS_NOT_PARITY` / `COLLAPSED_UNDER_DISTRACTORS` / `UNDERPOWERED`) and `mechanism`
+(`LATENT_BEATS_TEXT` / `TEXT_DID_NOT_COLLAPSE` / `LATENT_ALSO_COLLAPSED`), combined into
+`SHIP_TO_PROOF_5` / `HOLD`. It refuses to claim parity below n ≥ 30 and refuses to read
+the latent−text gap unless text actually collapsed.
 
 ```bash
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python proofs/p4_1_hardened.py \
-    --doc zorvian_codex --length 32000 --layer 12 --out proofs/data/p4_1.json
-# --no-think-on to skip the slow reasoning arm
-# re-score a saved run with the current scorers (no model, no GPU — iterate scorers free):
+    --length 32000 --layer 12 --depths 0.1,0.5,0.9 --out proofs/data/p4_1.json
+# faster first look: one depth, no think-on, skip the collapse arm
+python proofs/p4_1_hardened.py --depths 0.5 --no-think-on --no-dec
+# if dec_text doesn't collapse at 0.5, thin harder:
+python proofs/p4_1_hardened.py --dec-keep-rate 0.25
+# re-score a saved run with the current scorers (no GPU — iterate scorers free):
 python proofs/p4_1_hardened.py --rescore proofs/data/p4_1.json
 ```
 
 The raw per-condition answers are saved in `p4_1.json`, so `--rescore` regenerates the
-whole table without re-running the 32k generation.
-
-Sanity gates run first (subset-to-all no-op; C/C_filler must fail *with* distractors; 5
-raw injected answers printed for eyeball). The number to read first is
-**`dec_latent − dec_text` under strict scoring with distractors** — if the Exp-3.1
-mechanism survives there, nothing else in the table can sink the project. Verdict:
-`VINDICATED_HARDENED` / `SCALES_NOT_PARITY` / `EASY_TASK_ARTIFACT` /
-`MECHANISM_SCORER_INFLATED`.
+whole table (per-record decoys keyed by doc) with no model. The number to read first is
+**`dec_latent − dec_text` (strict) on the collapse arm** — if the Exp-3.1 mechanism
+survives there at n ≥ 30, nothing else in the table can sink the project. **This run is
+expensive** (many 32k cells); scope it with `--depths` / `--docs` / `--no-dec` for a
+quick pass before the full grid.
 
 ## What each rung decides
 
