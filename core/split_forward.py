@@ -265,8 +265,10 @@ def _rerotate_keys(model, key, deltas):
         )
     cos, sin = cs
     # cos/sin arrive as (1, S, head_dim); add the head axis to broadcast over heads.
-    cos = cos.to(key.dtype).unsqueeze(1)
-    sin = sin.to(key.dtype).unsqueeze(1)
+    # On a sharded model the rotary may emit them on its own device, so pin both to
+    # the key's device/dtype before the multiply.
+    cos = cos.to(device=key.device, dtype=key.dtype).unsqueeze(1)
+    sin = sin.to(device=key.device, dtype=key.dtype).unsqueeze(1)
     return key * cos + _rotate_half(key) * sin
 
 
