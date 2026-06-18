@@ -81,8 +81,10 @@ from proofs.common import (
 from proofs.needles import span_token_positions, needle_positions
 from proofs.decimate import kept_indices, decimated_text
 from proofs.long_context_docs import build_distractor_doc, selftest_filler
-from proofs.synthetic_docs import SYNTHETIC_DOCS, doc_by_name
-from proofs.synthetic_docs_long import SYNTHETIC_DOCS_LONG
+from proofs.fact_bank import (
+    span_docs, coref_docs, doc_by_name, distractors_map, decoy_values_map,
+    selftest_bank, n_facts,
+)
 
 # Proof 4.1 power / mechanism thresholds. P41_MIN_N is the gated-item floor below which
 # a "parity" claim is over-reading noise (the n=3 trap). COLLAPSE/GAP mirror Exp 3.1:
@@ -106,96 +108,14 @@ PREFILL_QSUFFIX = "\n\nQuestion: " + _QPART
 assert PREFILL_PREFIX + PREFILL_QSUFFIX == _common.PREFILL_PROMPT
 
 
-# ── distractor bank (Hardening 3): same surface form, WRONG values ─────────────
-# Hedged decoys ("some chroniclers insist", "a disputed pamphlet"), so the plainly
-# stated true needle should still win for A — but every question gets ≥1 wrong-value
-# competitor it must discriminate against. None contains a true gold (asserted below).
-DISTRACTORS = {
-    "zorvian_codex": [
-        "Some chroniclers insist the Zorvian Codex was first catalogued in the year "
-        "1602 by the explorer Toren Vask, who is said to have raised it from the ruins "
-        "of Antial.",
-        "A competing tradition holds that the codex contains exactly 2,118 verses and "
-        "was set down by the philosopher Esca Morrow during his long exile.",
-        "According to one disputed pamphlet, the scholar Halvard Crane produced the "
-        "first complete translation in 1889, well before any rival attempt.",
-        "It is occasionally claimed that the manuscript was attributed to the poet Sela "
-        "Brunn and that it numbers some 4,000 stanzas in all.",
-        "An old rumor maintains the work was recovered by Dalen Roost and first entered "
-        "the catalogues in the year 1450.",
-    ],
-    "harnel_engine": [
-        "Some manuals claim the Harnel rotary engine was designed in 1949 by the "
-        "engineer Corvin Thale for the airship Meridian.",
-        "A persistent rumor holds that it produced 2,460 horsepower and burned a fuel "
-        "known as red kerosene.",
-        "According to one trade circular, Pendran's compression arrangement was patented "
-        "as the Halvard coil.",
-        "It is sometimes said the Calistra completed 388 transcontinental flights before "
-        "it was retired.",
-        "An old catalogue lists the last surviving unit at the Dunmore Gallery rather "
-        "than any institute.",
-    ],
-    "marsh_of_olden": [
-        "Some chronicles assert the Marsh of Olden has been governed since 1559 by the "
-        "Tarn League, an assembly of seven elected stewards.",
-        "A competing account names its largest settlement as Wyhaven, built upon timber "
-        "pilings above the tide.",
-        "It is occasionally claimed the marsh is prized for the silverback carp, taken "
-        "only in the deep winter.",
-        "One disputed history credits the great levee to the architect Brannon Vesk.",
-        "An old rumor holds the governing body numbered eleven members in its earliest "
-        "years.",
-    ],
-    "tovic_protocol": [
-        "Some sources insist the Tovic Protocol was established in 1689 by the "
-        "cartographer Doran Mell for crossing the Ashen Strait.",
-        "A rival tradition holds that convoys were limited to no more than eight vessels.",
-        "According to one disputed log, each ship carried a marker lantern called a "
-        "fenlight.",
-        "It is occasionally claimed the lost merchant fleet Brae went down with 97 crew "
-        "aboard.",
-        "An old chart attributes the original survey to the navigator Ives Calder.",
-    ],
-    "ostrenko_accord": [
-        "Some histories claim the Ostrenko Accord was brokered in 1801 by the merchant "
-        "Garrin Vole between Davmoor and Tenley.",
-        "A competing record sets the tariff on smoked rivergrain at seven percent.",
-        "It is sometimes said the three arbiters were known instead as the Ashcloaks.",
-        "One disputed ledger holds that the agreement collapsed in 1888 after a flood.",
-        "An old rumor maintains the shared mint stood on the islet of Renn rather than "
-        "Cawl.",
-    ],
-}
+# ── distractor banks + decoy values come from the expanded fact_bank ──────────
+# Each doc carries native near-miss decoys (same surface form, WRONG value) and the
+# wrong-value tokens the strict scorer must rule out. Sourced from proofs/fact_bank.py
+# (50 facts across 10 docs, authored adversarially) so Proof 4.1 — and Proof 5 after
+# it — generalize across many independent facts, not five hand-picked ones.
+DISTRACTORS = distractors_map()
+DECOY_VALUES = decoy_values_map()
 
-
-# ── the three scorers (Hardening 1) ────────────────────────────────────────────
-# The ladder, from loosest to strictest, all on the SAME output:
-#   lenient   — gold appears ANYWHERE in the answer (the chain's containment scorer).
-#   firstline — gold appears in the answer CLAUSE (first sentence), not buried in a
-#               later restatement of the question.
-#   strict    — the clause names the true value EXCLUSIVELY and UNHEDGED: gold is in the
-#               clause, NO competing decoy value is, and there is no negation/uncertainty
-#               cue. This is the scorer the distractors (Hardening 3) make meaningful — a
-#               reply like "Maren Velloth, not Toren Vask" or "either Velloth or Vask"
-#               fails because it did not cleanly discriminate. A correct full-sentence
-#               answer still passes (unlike literal equality, which rejected everything).
-# The lenient−strict gap is the inflation, measured honestly.
-
-# Wrong-value tokens carried by each doc's distractor bank. A strict-correct answer must
-# contain none of these (it must pick the true needle, not a look-alike).
-DECOY_VALUES = {
-    "zorvian_codex": ["Toren Vask", "1602", "Antial", "Esca Morrow", "2118",
-                      "Halvard Crane", "1889", "Sela Brunn", "4000", "Dalen Roost",
-                      "1450"],
-    "harnel_engine": ["Corvin Thale", "1949", "Meridian", "2460", "red kerosene",
-                      "Halvard coil", "388", "Dunmore"],
-    "marsh_of_olden": ["Tarn League", "1559", "seven", "Wyhaven", "silverback carp",
-                       "Brannon Vesk", "eleven"],
-    "tovic_protocol": ["Doran Mell", "1689", "eight", "fenlight", "97", "Ives Calder"],
-    "ostrenko_accord": ["Garrin Vole", "1801", "seven percent", "Ashcloaks", "1888",
-                        "Renn"],
-}
 
 # Cues that the clause negates / hedges / declines the answer — disqualify strict even
 # if the gold string is present.
@@ -303,7 +223,7 @@ def run(model, tok, args):
     depths = [float(x) for x in args.depths.split(",")]
 
     main_names = ([n.strip() for n in args.docs.split(",")] if args.docs
-                  else list(DISTRACTORS.keys()))
+                  else [d["name"] for d in span_docs()])
     for n in main_names:
         if n not in DISTRACTORS:
             raise SystemExit(f"no distractor bank for {n!r} — add one to DISTRACTORS.")
@@ -399,21 +319,23 @@ def run(model, tok, args):
     # needle refers to it by anaphora) at the keep-rate where TEXT collapses. On the
     # answer-in-needle discrimination docs, needle_protected keeps the answer and text
     # never fails, so the gap there is meaningless — this is the only arm that can show
-    # latent > text honestly. No distractors here (the thinning is the stress).
+    # latent > text honestly. The coreference docs carry native distractors too, so this
+    # arm runs UNDER distractors (strict scoring rules out the decoy values).
     dec_records = []
     if not args.no_dec:
         dec_names = ([n.strip() for n in args.dec_docs.split(",")] if args.dec_docs
-                     else [d["name"] for d in SYNTHETIC_DOCS_LONG])
-        dec_by_name = {d["name"]: d for d in SYNTHETIC_DOCS_LONG}
+                     else [d["name"] for d in coref_docs()])
+        dec_by_name = {d["name"]: d for d in coref_docs()}
         print("\n" + "=" * 64)
         print(f"LATENT-vs-TEXT ARM — coreference docs={dec_names} "
               f"keep_rate={args.dec_keep_rate} (strided, needle_protected)")
         for name in dec_names:
             base = dec_by_name[name]
+            distractors, decoys = DISTRACTORS.get(name, []), DECOY_VALUES.get(name, [])
             for depth in depths:
-                doc = build_distractor_doc(tok, base, args.length, depth, [],
+                doc = build_distractor_doc(tok, base, args.length, depth, distractors,
                                            max_doc_tokens=args.max_doc_tokens)
-                filler = build_distractor_doc(tok, base, args.length, depth, [],
+                filler = build_distractor_doc(tok, base, args.length, depth, distractors,
                                               max_doc_tokens=args.max_doc_tokens,
                                               drop_fact=True)
                 ids = tok(doc["text"], return_tensors="pt", truncation=True,
@@ -443,8 +365,8 @@ def run(model, tok, args):
                            "gold": gold, "kept_count": len(kept),
                            "keep_rate": args.dec_keep_rate,
                            "answers": {"dec_text@off": a_txt, "dec_latent@off": a_lat},
-                           "scores": {"dec_text@off": score_all(a_txt, gold, ()),
-                                      "dec_latent@off": score_all(a_lat, gold, ())}}
+                           "scores": {"dec_text@off": score_all(a_txt, gold, decoys),
+                                      "dec_latent@off": score_all(a_lat, gold, decoys)}}
                     dec_records.append(rec)
                     print(f"     [{name}|d{depth}] {q[:42]!r}  "
                           f"text={rec['scores']['dec_text@off']['strict']} "
@@ -693,6 +615,10 @@ def main():
     if not selftest_filler():
         print("!!! filler not inert — fix proofs/long_context_docs.py first.")
         sys.exit(1)
+    if not selftest_bank():
+        print("!!! fact bank malformed — fix proofs/fact_bank.py first.")
+        sys.exit(1)
+    print(f"fact bank: {n_facts('span')} span + {n_facts('coref')} coref facts available")
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
 
     from config import StitcherConfig

@@ -133,10 +133,18 @@ keep it above your longest length (and under the model's 128k context). The stat
 selftest runs first (`python proofs/long_context_docs.py`); the behavioural inertness
 gate runs per cell.
 
+The bigger bank these draw on lives in [`fact_bank.py`](fact_bank.py): **50 adversarially
+authored facts across 10 docs** (30 answer-in-span + 20 coreference), mixing fact types
+(name / date / number / multitoken / common-word / relation), with native near-miss
+distractors per doc and a forced lexical gap between question and needle. This is the
+*generalization* infrastructure Proof 5's "latent beats text-RAG" claim needs (five facts
+measured six ways is still five facts); a pure-string `selftest_bank()` enforces every
+authoring invariant. Run `python proofs/fact_bank.py` after editing it.
+
 **5.1 · Proof 4.1 — hardened confirmation.** Proof 4's 32k recall of 1.00 is almost too
 clean, so before Proof 5 we re-test the most stressful point (32k / L12) with the
-evaluation slack removed, **pooled over all distractor-banked docs × depths to reach
-n ≥ 30** (the first run had n=3 — too few to resolve a 33% effect)
+evaluation slack removed, **pooled over the span docs × depths for n well past 30
+independent facts** (the first run had n=3 — too few to resolve a 33% effect)
 ([`p4_1_hardened.py`](p4_1_hardened.py)):
 
 - **strict scoring** — `lenient` (containment), `firstline` (gold in the answer clause),
@@ -146,9 +154,9 @@ n ≥ 30** (the first run had n=3 — too few to resolve a 33% effect)
 - **capture/A symmetry** — `inject_docnaive` (document-only capture) vs `inject_qfair`
   (captured inside the same instruction+document framing A sees); honest ceiling
   comparison is `inject_qfair` vs `A`.
-- **distractor filler** — near-miss decoys (same surface form, wrong values; banks for
-  all 5 docs) woven in at other depths; re-gated (C, C_filler fail; A succeeds), so a
-  correct answer must *discriminate* the true needle.
+- **distractor filler** — near-miss decoys (same surface form, wrong values; native to
+  every doc in `fact_bank.py`) woven in at other depths; re-gated (C, C_filler fail; A
+  succeeds), so a correct answer must *discriminate* the true needle.
 - **reasoning on** — a think-on arm for A / inject (Proof 5's actual path).
 
 Two arms, reported separately: the **discrimination arm** above, and a **latent-vs-text
