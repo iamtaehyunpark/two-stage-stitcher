@@ -140,6 +140,21 @@ def _seed(name, target_tokens, depth, salt):
     return zlib.crc32(f"{name}|{target_tokens}|{depth}|{salt}".encode()) & 0xFFFFFFFF
 
 
+def _locate_token_span(enc_offsets, char_start, char_end):
+    """Map a character span to its covering token indices in an offsets list (special
+    tokens report a zero-width span and are skipped). Returns (tok_start, tok_end) or
+    None."""
+    tok_start = tok_end = None
+    for i, (s, e) in enumerate(enc_offsets):
+        if s == e:
+            continue
+        if s < char_end and e > char_start:
+            if tok_start is None:
+                tok_start = i
+            tok_end = i
+    return (tok_start, tok_end) if tok_start is not None else None
+
+
 def build_padded_doc(tokenizer, base_doc, target_tokens, depth, max_doc_tokens=40000,
                      drop_fact=False):
     """Assemble one padded document.
@@ -219,6 +234,84 @@ def build_padded_doc(tokenizer, base_doc, target_tokens, depth, max_doc_tokens=4
         "depth_actual": depth_actual,
         "fact_token_span": fact_token_span,
         "drop_fact": drop_fact,
+    }
+
+
+def build_distractor_doc(tokenizer, base_doc, target_tokens, depth, distractors,
+                         distractor_depths=None, max_doc_tokens=40000, drop_fact=False):
+    """Proof 4.1, Hardening 3 — a padded document whose filler also carries NEAR-MISS
+    DISTRACTORS: decoy sentences with the same surface form as the true needle but
+    WRONG values, planted at other depths. The inertness gate proves the filler does
+    not *answer* the question; distractors make it *compete*, so a correct answer now
+    requires discriminating the true needle from look-alikes — the realistic task.
+
+    Same contract / return shape as `build_padded_doc`, plus `distractor_spans` (the
+    char ranges of each decoy, recorded for inspection). With `drop_fact=True` the true
+    fact block is removed but the distractors REMAIN — that is the filler-only gate
+    *with distractors*: C_filler must still fail, i.e. the model must not be fooled into
+    emitting the true gold by the wrong-valued decoys (by construction it cannot, since
+    they carry different values; verify behaviourally anyway).
+    """
+    fact_text = base_doc["text"]
+    n_fact = len(tokenizer(fact_text, add_special_tokens=False).input_ids)
+    distractors = list(distractors or [])
+    n_dist = sum(len(tokenizer(d, add_special_tokens=False).input_ids) for d in distractors)
+
+    filler_budget = max(0, target_tokens - (0 if drop_fact else n_fact) - n_dist)
+    # Build the filler to an EXACT token budget (same trim method as build_padded_doc),
+    # then split it at token-fractions and weave the blocks into the gaps. This hits the
+    # target length precisely regardless of tokenizer, instead of estimating sentence
+    # counts (which undershot).
+    filler_str = _filler_with_token_budget(
+        tokenizer, filler_budget,
+        _seed(base_doc["name"], target_tokens, depth, "distractor"), max_doc_tokens)
+    filler_ids = tokenizer(filler_str, add_special_tokens=False).input_ids
+    n_fill = len(filler_ids)
+
+    # Insertion plan: the fact at `depth`, each distractor at its own depth (spread away
+    # from the fact by default). The blocks carry their own surrounding whitespace.
+    if distractor_depths is None:
+        spread = [0.12, 0.30, 0.70, 0.88, 0.95]
+        distractor_depths = (spread * ((len(distractors) // len(spread)) + 1))[:len(distractors)]
+    inserts = []
+    if not drop_fact:
+        inserts.append((depth, "\n\n" + fact_text + "\n\n"))
+    for d, frac in zip(distractors, distractor_depths):
+        inserts.append((frac, " " + d.strip() + " "))
+    inserts.sort(key=lambda x: x[0])
+
+    parts, prev = [], 0
+    for frac, block in inserts:
+        cut = max(prev, min(n_fill, int(round(frac * n_fill))))
+        parts.append(tokenizer.decode(filler_ids[prev:cut], skip_special_tokens=True))
+        parts.append(block)
+        prev = cut
+    parts.append(tokenizer.decode(filler_ids[prev:], skip_special_tokens=True))
+    text = "".join(parts)
+
+    enc = tokenizer(text, return_offsets_mapping=True, truncation=True,
+                    max_length=max_doc_tokens)
+    n_tokens = len(enc["input_ids"])
+
+    fact_token_span = None
+    depth_actual = depth
+    if not drop_fact:
+        cs = text.find(fact_text)
+        fact_token_span = _locate_token_span(enc["offset_mapping"], cs, cs + len(fact_text))
+        if fact_token_span is not None:
+            depth_actual = round(fact_token_span[0] / max(1, n_tokens), 3)
+
+    distractor_spans = []
+    for d in distractors:
+        cs = text.find(d.strip())
+        distractor_spans.append((cs, cs + len(d.strip())) if cs >= 0 else None)
+
+    return {
+        "name": base_doc["name"], "text": text, "qa": base_doc["qa"],
+        "target_tokens": target_tokens, "n_tokens": n_tokens,
+        "depth": depth, "depth_actual": depth_actual,
+        "fact_token_span": fact_token_span, "drop_fact": drop_fact,
+        "n_distractors": len(distractors), "distractor_spans": distractor_spans,
     }
 
 

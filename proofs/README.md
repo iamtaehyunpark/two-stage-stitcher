@@ -133,6 +133,36 @@ keep it above your longest length (and under the model's 128k context). The stat
 selftest runs first (`python proofs/long_context_docs.py`); the behavioural inertness
 gate runs per cell.
 
+**5.1 · Proof 4.1 — hardened single-point confirmation.** Proof 4's 32k recall of 1.00
+is almost too clean, so before Proof 5 we re-test the single most stressful point
+(32k / L12 / depth 0.5) with the evaluation slack removed — one cell, run many ways
+([`p4_1_hardened.py`](p4_1_hardened.py)):
+
+- **strict scoring** — report `lenient` (containment), `firstline` (gold in the answer
+  clause), and `strict` (the clause *is* the gold) side by side; the lenient−strict
+  delta is the inflation.
+- **capture/A symmetry** — `inject_docnaive` (document-only capture) vs `inject_qfair`
+  (capture inside the same instruction+document framing A sees); honest ceiling
+  comparison is `inject_qfair` vs `A`.
+- **distractor filler** — near-miss decoys (same surface form, wrong values) planted at
+  other depths, so a correct answer must *discriminate* the true needle. Re-gated (C and
+  C_filler must still fail, A must still succeed).
+- **reasoning on** — a think-on arm for A / inject (Proof 5's actual path), alongside
+  think-off.
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python proofs/p4_1_hardened.py \
+    --doc zorvian_codex --length 32000 --layer 12 --out proofs/data/p4_1.json
+# --no-think-on to skip the slow reasoning arm
+```
+
+Sanity gates run first (subset-to-all no-op; C/C_filler must fail *with* distractors; 5
+raw injected answers printed for eyeball). The number to read first is
+**`dec_latent − dec_text` under strict scoring with distractors** — if the Exp-3.1
+mechanism survives there, nothing else in the table can sink the project. Verdict:
+`VINDICATED_HARDENED` / `SCALES_NOT_PARITY` / `EASY_TASK_ARTIFACT` /
+`MECHANISM_SCORER_INFLATED`.
+
 ## What each rung decides
 
 | Rung | Document | Decides | PASS | FAIL |
