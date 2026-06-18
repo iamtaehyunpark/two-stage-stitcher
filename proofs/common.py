@@ -98,11 +98,11 @@ def _device(model):
     return next(model.parameters()).device
 
 
-def generate_plain(model, tokenizer, prompt, max_new_tokens):
+def generate_plain(model, tokenizer, prompt, max_new_tokens, max_length=8192):
     import torch
     prompt = _with_think_control(prompt)
     ids = tokenizer(prompt, return_tensors="pt", truncation=True,
-                    max_length=8192).to(_device(model))
+                    max_length=max_length).to(_device(model))
     with torch.no_grad():
         out = model.generate(**ids, max_new_tokens=max_new_tokens, do_sample=False,
                              pad_token_id=tokenizer.eos_token_id)
@@ -115,10 +115,15 @@ def no_context_answer(model, tokenizer, question, max_new_tokens=256):
                           NO_CONTEXT_PROMPT.format(question=question), max_new_tokens)
 
 
-def full_prefill_answer(model, tokenizer, document, question, max_new_tokens=256):
+def full_prefill_answer(model, tokenizer, document, question, max_new_tokens=256,
+                        max_length=8192):
+    """Condition A: prefill `document` + `question` as ordinary tokens. `max_length`
+    is the truncation cap — the default 8192 is right for the short-doc proofs, but
+    Proof 4 raises it so a 32k-token padded document is prefilled in full (a silently
+    truncated A would be a false ceiling: the model never sees the planted fact)."""
     return generate_plain(model, tokenizer,
                           PREFILL_PROMPT.format(document=document, question=question),
-                          max_new_tokens)
+                          max_new_tokens, max_length=max_length)
 
 
 def capture_document(model, tokenizer, document, target_layer, max_doc_tokens=8192):

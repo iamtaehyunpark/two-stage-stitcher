@@ -89,6 +89,38 @@ the resolved coreferent. The canary — `dec_latent` at keep-rate 1 must equal
 `full_latent` — is the first thing to check: if it fails, the position/decimation
 bookkeeping is wrong and the sweep is noise.
 
+**5 · Proof 4 — length scaling.** Does everything validated at ~130 tokens survive as
+documents grow to the lengths the project is for (2k … 32k)? Each synthetic fact block
+is padded to a target length with **inert filler** ([`long_context_docs.py`](long_context_docs.py)
+— entity-free, digit-free prose) and planted at a chosen needle depth. The trap unique
+to Proof 4 is *filler contamination* — padding that accidentally carries a cue — so
+inertness is re-checked **per length** by a `C_filler` gate (prefill the padded doc with
+the fact *removed*; the model must still fail). A cell is gated iff `C` fails, `C_filler`
+fails, and `A` succeeds.
+
+Run it **staged** — the first curve tells you where to spend; don't run the full grid blind:
+
+```bash
+# Stage 1 — the gate (cheapest): inject-all-N at L12, depth 50%, across lengths.
+CUDA_VISIBLE_DEVICES=0,1,2,3 python proofs/p4_length.py --stage curve \
+    --lengths 500,2000,8000,16000,32000 --layer 12 --out proofs/data/p4_curve.json
+
+# Stage 2 — ONLY at the length where recall first dropped: re-sweep the layer.
+CUDA_VISIBLE_DEVICES=0,1,2,3 python proofs/p4_length.py --stage relayer \
+    --lengths 8000,16000 --layers 8,12,20,30 --out proofs/data/p4_relayer.json
+
+# Stage 3 — depth, sparse handoff, latent-vs-text, at the winning layer.
+CUDA_VISIBLE_DEVICES=0,1,2,3 python proofs/p4_length.py --stage axes \
+    --lengths 2000,8000,16000 --depths 0.1,0.5,0.9 --layer 12 --out proofs/data/p4_axes.json
+```
+
+The headline is **recall vs length**; the verdict (`HOLDS_AT_LENGTH` /
+`DROP_AT_LENGTH_RESWEEP_LAYER` / `RESCUED_BY_RELAYER` / `DECAYS_AT_LENGTH`) keys on
+inject-all-N staying ≥ 0.8 as length grows. `--max-doc-tokens` (default 40000) is the
+truncation cap for capture/prefill — raise it above your longest length, and mind H200
+memory and the model's 128k context at 32k+. The static filler selftest runs first
+(`python proofs/long_context_docs.py`); the behavioural inertness gate runs per cell.
+
 ## What each rung decides
 
 | Rung | Document | Decides | PASS | FAIL |

@@ -27,7 +27,7 @@ The SLM enters only at Proof 6.
 | 1 | Injection premise | injected states are read & reasoned over | inject-all-N succeeds where C fails | premise broken → **stop project** | **CONFIRMED** (layer-dependent; ≈1.0 at L12–14) |
 | 2 | Wrong-doc falsifier | it's injection, not memory | wrong-doc fails X | "success" was memory → **falsified** | **PASS** (wrong-doc 0.00 at L12/24/25) |
 | 3 | Path resolution | full prefix vs sparse needles | (see outcomes) | — | **implemented** (`proofs/p3_path.py`, fixed at layer 12); awaiting run |
-| 4 | Length scaling | survives long context | recall holds at 16k/32k+ | dies at length → premise unproven | pending (blocked by 3) |
+| 4 | Length scaling | survives long context | recall holds at 16k/32k+ | dies at length → premise unproven | **implemented** (`proofs/p4_length.py`, staged: curve→relayer→axes); awaiting run |
 | 5 | Latent beats text-RAG | reason to exist | latent ≥ text-RAG at lower cost | dead weight vs RAG | **motivated** by Exp 3.1 (latent ≠ text); pending full run |
 | 6 | Stitcher reproduces states | the SLM works | stitched recovers facts | translation is the real bottleneck | pending (blocked by 5) |
 
@@ -77,13 +77,33 @@ set of answer-bearing positions suffices (Path 2).
 - needles work but random-subset also works → suspicious; content isn't being selected; re-examine.
 
 ## Proof 4 — Length scaling
-**Claim:** whatever works at ~1.3k tokens still works (or doesn't) at the lengths the
+**Claim:** whatever works at ~130 tokens still works (or doesn't) at the lengths the
 project is for.
-**Experiment:** repeat Proofs 1–3 across lengths (1k, 4k, 16k, 32k+), synthetic facts
-planted at varying depths. Measure recall vs length and vs needle-depth.
-**Why its own rung:** the premise is *long* documents; a method that works at 1.3k and
-dies at 16k hasn't proven the thing that matters. Path 1 vs Path 2 economics are
-decided here.
+**Experiment** (`proofs/p4_length.py`): pad each synthetic fact block to a target
+length (500 / 2k / 8k / 16k / 32k) with **inert filler** (entity-free, digit-free
+prose — [`long_context_docs.py`](../proofs/long_context_docs.py)) and plant it at
+needle depth ~10% / ~50% / ~90%. Re-run the core conditions across the
+length × depth grid, **re-sweeping the injection layer at each length** (the optimal
+layer may migrate deeper as context grows — don't assume 12 transfers).
+**The Proof-4-specific trap — filler contamination:** padding can accidentally carry a
+cue, creating a false floor. So inertness is **re-checked behaviourally per length**, not
+inherited: each cell adds a `C_filler` gate (prefill the padded doc with the fact
+*removed* and confirm the model still can't answer). A cell is gated iff
+`C` fails **and** `C_filler` fails **and** `A` succeeds.
+**Run it staged — let the first curve tell you where to spend:**
+- `--stage curve` (the gate): inject-all-N at layer 12, depth 50%, across lengths.
+  Does recall stay ≈1.0 at 2k/8k? If yes, scale up; if it drops, the layer re-sweep
+  becomes the priority and you've found the real research question early.
+- `--stage relayer` (only where the curve dropped): re-sweep layers {8,12,20,30} at
+  that length. Does re-picking the layer rescue recall? Where is the optimal layer vs
+  length (a layer that migrates *deeper* is the hoped-for outcome — more prefill
+  skipped where it matters).
+- `--stage axes` (last): needle-depth {10/50/90%}, sparse handoff (needles-only), and
+  latent-vs-text at fixed thinning — the Exp-3.1 gap at length (widen / hold / collapse).
+**Why its own rung:** the premise is *long* documents; a method that works at 130 tokens
+and dies at 16k hasn't proven the thing that matters. Path 1 vs Path 2 economics are
+decided here. **None of the outcomes stop the project** — a decay that survives a layer
+re-sweep redirects to the multi-slot / per-chunk handoff, it does not kill the SLM.
 
 ## Proof 5 — Latent handoff beats text handoff (reason to exist)
 **Claim:** transferring *latent representations* beats handing the LLM the retrieved
