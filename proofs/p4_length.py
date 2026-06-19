@@ -231,9 +231,9 @@ def evaluate(model, tok, docs, lengths, depths, layers, conditions, keep_rate,
 
                         if "latent_vs_text" in conditions:
                             # fixed-thinning Exp-3.1 contrast: keep the same survivor
-                            # set for both arms (needle protected, strided).
+                            # set for both arms (needle decimated, strided).
                             kept = kept_indices(n_doc, qa["needle_idx"], keep_rate,
-                                                "strided", "needle_protected",
+                                                "strided", "needle_decimated",
                                                 seed=0, keep_sink=True)
                             txt = decimated_text(tok, ids, kept)
                             a_txt = full_prefill_answer(model, tok, txt, qa["q"],

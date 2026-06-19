@@ -386,7 +386,7 @@ def main():
                         help="injection layer (validated winner is 12)")
     parser.add_argument("--keep-rates", default="0.5,0.25,0.125,0.0625")
     parser.add_argument("--patterns", default="strided,random")
-    parser.add_argument("--variants", default="needle_protected,needle_decimated")
+    parser.add_argument("--variants", default="needle_decimated,needle_protected")
     parser.add_argument("--conditions", default=",".join(ALL_CONDITIONS))
     parser.add_argument("--random-trials", type=int, default=1,
                         help="random-pattern draws per cell, averaged (≥2 reduces draw luck)")
