@@ -20,6 +20,23 @@ The SLM enters only at Proof 6.
 > ≈0.45. A RoPE-renumbered control tracks the original-position arm, so the advantage
 > is **representational, not a position artifact.** Latent ≠ text — the green light
 > Proof 5 needed. Full write-up: [`exp_3_1_decimation.md`](exp_3_1_decimation.md).
+>
+> **Result (2026-06-19):** Proof 4 (length scaling) **passes** and Proof 4.1 (a
+> hardened re-test) confirms it. inject-all-N holds at **≈1.0 from 500 → 32k tokens at
+> L12**, flat across needle depth 10/50/90% (no lost-in-the-middle for injection), the
+> optimal layer does **not** migrate, sparse handoff survives length, and the latent>text
+> gap **widens** with length (text decays, latent holds). Proof 4.1 then re-ran the 32k
+> point with the evaluation slack removed — strict scoring, q-fair capture symmetry,
+> near-miss distractors, reasoning-on — pooled over **30 distinct facts** from the new
+> adversarial [`fact_bank.py`](../proofs/fact_bank.py): on the gated set
+> `inject_docnaive = A = 0.97` (strict, with distractors), `qfair = 0.93` and the **most
+> robust under reasoning** (0.92 vs A 0.90, docnaive 0.83), and on coreference docs
+> thinned to collapse, **`dec_latent = 0.61` vs `dec_text = 0.03` (gap +0.58)** under
+> strict + distractors. The distractors bite even full-prefill A (~15% decoy-confusion
+> at depth 0.9), so "parity with A" is parity with a genuinely stressed ceiling. Caveats
+> carried forward: latent recovery is **partial** (~0.6, as in 3.1), and Path-2
+> sparse-handoff is the weakest inject condition under stress (0.75). Receiver validated
+> end-to-end; **Proof 5 is earned.**
 
 | # | Proof | Proves | Pass | Fail | Status |
 |---|---|---|---|---|---|
@@ -27,8 +44,8 @@ The SLM enters only at Proof 6.
 | 1 | Injection premise | injected states are read & reasoned over | inject-all-N succeeds where C fails | premise broken → **stop project** | **CONFIRMED** (layer-dependent; ≈1.0 at L12–14) |
 | 2 | Wrong-doc falsifier | it's injection, not memory | wrong-doc fails X | "success" was memory → **falsified** | **PASS** (wrong-doc 0.00 at L12/24/25) |
 | 3 | Path resolution | full prefix vs sparse needles | (see outcomes) | — | **implemented** (`proofs/p3_path.py`, fixed at layer 12); awaiting run |
-| 4 | Length scaling | survives long context | recall holds at 16k/32k+ | dies at length → premise unproven | **implemented** (`proofs/p4_length.py`, staged: curve→relayer→axes); awaiting run |
-| 5 | Latent beats text-RAG | reason to exist | latent ≥ text-RAG at lower cost | dead weight vs RAG | **motivated** by Exp 3.1 (latent ≠ text); pending full run |
+| 4 | Length scaling | survives long context | recall holds at 16k/32k+ | dies at length → premise unproven | **PASS** (≈1.0 to 32k at L12, depth-flat; hardened by 4.1 on 30 facts) |
+| 5 | Latent beats text-RAG | reason to exist | latent ≥ text-RAG at lower cost | dead weight vs RAG | **next** — receiver validated (0–4.1); motivated by Exp 3.1 + 4.1 (latent 0.61 vs text 0.03 at 32k) |
 | 6 | Stitcher reproduces states | the SLM works | stitched recovers facts | translation is the real bottleneck | pending (blocked by 5) |
 
 ---
@@ -104,6 +121,30 @@ inherited: each cell adds a `C_filler` gate (prefill the padded doc with the fac
 and dies at 16k hasn't proven the thing that matters. Path 1 vs Path 2 economics are
 decided here. **None of the outcomes stop the project** — a decay that survives a layer
 re-sweep redirects to the multi-slot / per-chunk handoff, it does not kill the SLM.
+**Result (2026-06-19):** the cheapest curve was already decisive — inject-all-N held at
+**1.00 from 500 → 32k** at L12, depth-flat at 10/50/90% (≈300 gated cells), so the
+relayer stage was moot (nothing dropped, the L12 shelf does not migrate). The axes stage
+added: sparse handoff survives length (0.81→0.85), and the latent−text gap **widens** with
+length (dec_text 1.00→0.92 as dec_latent holds ≈1.0). A's own retrieval shows the faint
+32k lost-in-the-middle dip (0.96); injection does not. **PASS.**
+
+## Proof 4.1 — Hardened single-point confirmation
+**Claim:** the Proof-4 headline survives strict measurement, not just lenient scoring on
+easy facts. **Experiment** (`proofs/p4_1_hardened.py`): re-test 32k / L12 with the
+evaluation slack removed, pooled over the adversarial [`fact_bank.py`](../proofs/fact_bank.py)
+(50 facts / 10 docs) for real n — (1) **strict scoring** (gold in the answer clause,
+exclusively, unhedged) beside lenient/firstline; (2) **capture/A symmetry** —
+`inject_qfair` captured inside A's instruction+document framing vs document-only
+`inject_docnaive`; (3) **near-miss distractors** woven in so a correct answer must
+*discriminate* the true needle; (4) **reasoning-on** arm (Proof 5's actual path). The
+latent-vs-text contrast runs on coreference docs thinned to where text collapses.
+**Result (2026-06-19):** discrimination **PARITY_WITH_A** (n=76 from 30 facts:
+`docnaive = A = 0.97`, `qfair = 0.93` strict, and qfair the most reasoning-robust);
+mechanism **LATENT_BEATS_TEXT** (n=59 from 20 facts: `dec_latent 0.61` vs `dec_text 0.03`,
+gap +0.58, strict + distractors). Distractors fool full-prefill A ~15% at depth 0.9, so
+parity is against a stressed ceiling. **SHIP_TO_PROOF_5.** Caveats carried forward: latent
+recovery is partial (~0.6), sparse handoff weakest under stress (0.75), q-fair capture is
+the robust one to use going forward.
 
 ## Proof 5 — Latent handoff beats text handoff (reason to exist)
 **Claim:** transferring *latent representations* beats handing the LLM the retrieved
