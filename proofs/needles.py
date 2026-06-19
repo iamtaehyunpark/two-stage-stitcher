@@ -76,6 +76,26 @@ def span_token_positions(tokenizer, document, span, max_doc_tokens=8192):
     return positions
 
 
+def token_positions_for_char_span(tokenizer, document, char_start, char_end,
+                                  max_doc_tokens=8192):
+    """Like `span_token_positions`, but located by a KNOWN character range rather than by
+    re-finding the span text. Proof 5 needs this: a HotpotQA gold supporting sentence can
+    recur verbatim in a distractor paragraph, so `document.find(span)` would mis-place the
+    needle; `hotpot.py` already records each gold sentence's exact (char_start, char_end)
+    within its own paragraph, and this maps that range to token indices via the same
+    offset mapping. Raises if the range maps to zero tokens (a bookkeeping error that would
+    otherwise silently fake a sparse-handoff failure)."""
+    enc = tokenizer(document, return_tensors=None, return_offsets_mapping=True,
+                    truncation=True, max_length=max_doc_tokens)
+    positions = []
+    for i, (s, e) in enumerate(enc["offset_mapping"]):
+        if s == e:                                   # special tokens (BOS)
+            continue
+        if s < char_end and e > char_start:          # token overlaps the char range
+            positions.append(i)
+    return positions      # may be empty if the span was truncated past max_doc_tokens
+
+
 # ── condition position-set builders ───────────────────────────────────────────
 def needle_positions(needle_idx, keep_sink=True):
     """needles-only: the answer-bearing positions, plus the attention sink if

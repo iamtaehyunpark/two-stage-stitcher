@@ -186,6 +186,49 @@ survives there at n ≥ 30, nothing else in the table can sink the project. **Th
 expensive** (many 32k cells); scope it with `--depths` / `--docs` / `--no-dec` for a
 quick pass before the full grid.
 
+**6 · Proof 5 — latent handoff vs. text-RAG.** The project's existential test, on REAL
+multi-hop questions (HotpotQA distractor): does injecting a document's latent KV beat
+handing the reasoner *retrieved text* at equal information budget? If latent ≈ RAG, the
+latent machinery is an expensive reimplementation of retrieval. Operating point pinned
+from 4.1: **L12, strict, q-fair, think-ON**. Three new pieces feed the runner
+([`p5_latent_vs_rag.py`](p5_latent_vs_rag.py)):
+
+- [`hotpot.py`](hotpot.py) — concatenates each item's 10 paragraphs in order, locates the
+  gold supporting *sentences* (recurrence-safe, by recorded char range) → `needle_idx`.
+  CPU prep, cached. `python proofs/hotpot.py --mock` checks the span logic with no download.
+- [`retriever.py`](retriever.py) — the strong baseline: **BGE-large-en-v1.5** on CPU,
+  sentence-aware chunking (size tuned on a held-out slice — tune the baseline to win), a
+  k-sweep + budget-matched k, and recall-by-char-containment for failure attribution.
+- [`synth_multihop.py`](synth_multihop.py) — the controls: ~20 invented-entity 2-hop items
+  (zero memory leakage, breaks a HotpotQA null) **plus** single-hop extraction items where
+  latent and text **must tie** (the prompt-asymmetry trap from Proof 4's docnaive).
+
+The gate is the same discipline as everywhere: score only items where closed-book **C
+fails** and full-document **A succeeds**. On that set the runner scores the 2×2 of
+{gold spans, retrieved spans} × {latent, text} plus the ceilings (A, latent_all), then
+reports the four numbers that decide the project — `latent_sparse − text_gold` (1),
+`latent_sparse − text_rag@best` raw and retrieval-conditioned (2), `latent_all − A` (3),
+and synthetic agreement (4). Word-boundary scoring (not substring) is mandatory here so a
+refusal can't score a yes/no answer.
+
+```bash
+# the main arm (gate is resumable; cached to p5_gated_hotpot.json)
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python proofs/p5_latent_vs_rag.py \
+    --arm hotpot --max-candidates 400 --out proofs/data/p5.json
+# the synthetic control + the single-hop parity control
+python proofs/p5_latent_vs_rag.py --arm synth_multihop --out proofs/data/p5_synth.json
+python proofs/p5_latent_vs_rag.py --arm synth_parity   --out proofs/data/p5_parity.json
+# cheap end-to-end wire test (no reasoning) before the real run
+python proofs/p5_latent_vs_rag.py --arm hotpot --max-candidates 30 --no-think
+# re-score saved answers with current scorers (no GPU)
+python proofs/p5_latent_vs_rag.py --rescore proofs/data/p5.json
+```
+
+The **canary** (inject-all-positions == full inject) must be 0 mismatches before any latent
+number is trusted. Run the no-GPU selftests first — `python proofs/hotpot.py --mock`,
+`python proofs/synth_multihop.py`, `python proofs/retriever.py` — they gate GPU time the way
+`selftest_bank` / `selftest_filler` do for 4.1.
+
 ## What each rung decides
 
 | Rung | Document | Decides | PASS | FAIL |
