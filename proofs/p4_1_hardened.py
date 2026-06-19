@@ -254,8 +254,11 @@ def run(model, tok, args):
 
     # ───────────── discrimination arm: A / inject_docnaive / inject_qfair ─────────
     print("\n" + "=" * 64)
-    print(f"DISCRIMINATION ARM — docs={main_names} depths={depths}")
-    for name in main_names:
+    if args.dec_only:
+        print("DISCRIMINATION ARM — skipped (--dec-only)")
+    else:
+        print(f"DISCRIMINATION ARM — docs={main_names} depths={depths}")
+    for name in (main_names if not args.dec_only else []):
         base = doc_by_name(name)
         distractors, decoys = DISTRACTORS[name], DECOY_VALUES.get(name, [])
         for depth in depths:
@@ -345,7 +348,7 @@ def run(model, tok, args):
         dec_by_name = {d["name"]: d for d in coref_docs()}
         print("\n" + "=" * 64)
         print(f"LATENT-vs-TEXT ARM — coreference docs={dec_names} "
-              f"keep_rate={args.dec_keep_rate} (strided, needle_protected)")
+              f"keep_rate={args.dec_keep_rate} (strided, needle_decimated)")
         for name in dec_names:
             base = dec_by_name[name]
             distractors, decoys = DISTRACTORS.get(name, []), DECOY_VALUES.get(name, [])
@@ -375,7 +378,7 @@ def run(model, tok, args):
                 for it in gated:
                     q, gold, idx, alts = it["q"], it["gold"], it["needle_idx"], it["alts"]
                     kept = kept_indices(n_doc, idx, args.dec_keep_rate, "strided",
-                                        "needle_protected", seed=0, keep_sink=True)
+                                        "needle_decimated", seed=0, keep_sink=True)
                     a_txt = ans_A(model, tok, decimated_text(tok, ids, kept), q, mnt,
                                   args.max_doc_tokens)
                     a_lat = inject_answer_subset(model, tok, cache, n_doc, kept, q, layer, mnt)
@@ -606,8 +609,11 @@ def main():
                         help="comma-separated coreference docs for the latent-vs-text arm "
                              "(default: all of synthetic_docs_long)")
     parser.add_argument("--dec-keep-rate", type=float, default=0.5,
-                        help="keep-rate for the collapse arm (strided, needle_protected); "
+                        help="keep-rate for the collapse arm (strided, needle_decimated); "
                              "lower it until dec_text collapses")
+    parser.add_argument("--dec-only", action="store_true",
+                        help="run ONLY the latent-vs-text (decimation) arm; skip the "
+                             "discrimination arm (A / inject / qfair / needles)")
     parser.add_argument("--no-dec", action="store_true",
                         help="skip the latent-vs-text (collapse) arm")
     parser.add_argument("--length", type=int, default=32000)
