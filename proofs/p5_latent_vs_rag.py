@@ -669,8 +669,10 @@ def main():
     ap.add_argument("--rag-device", default="cpu", help="device for the BGE retriever")
     ap.add_argument("--rag-backend", default="bge", choices=["bge", "hash"])
     ap.add_argument("--gpus", default=None,
-                    help="comma-separated LOGICAL GPU indices within CUDA_VISIBLE_DEVICES "
-                         "(default = all visible). Pin to free GPUs to avoid busy ones.")
+                    help="comma-separated PHYSICAL GPU ids to use, e.g. 4,5,6,7 (sets "
+                         "CUDA_VISIBLE_DEVICES; the model then shards over the contiguous "
+                         "logical 0..N-1). Pin to free GPUs to avoid busy ones. Default = "
+                         "all visible / whatever CUDA_VISIBLE_DEVICES already restricts.")
     ap.add_argument("--device-map", default="balanced_low_0",
                     help="layer placement; 'balanced_low_0' spreads weights across every "
                          "GPU and keeps GPU0 light (needed to avoid the front-packing OOM).")
@@ -694,6 +696,16 @@ def main():
         print(f"\nRe-scored → {out}")
         return
 
+    # ── physical GPU selection (must happen before ANY cuda init, incl. _preflight's
+    # sentence-transformers import). --gpus sets CUDA_VISIBLE_DEVICES so the model always
+    # shards over the CONTIGUOUS logical set 0..N-1: accelerate's get_balanced_memory
+    # indexes max_memory by range(1, num_devices), so non-0-based keys (e.g. {4,5,6,7})
+    # throw `KeyError: 1`. Passing --gpus as physical ids and translating here is what lets
+    # `--gpus 4,5,6,7` mean "use GPUs 4–7" without that trap. An externally-set
+    # CUDA_VISIBLE_DEVICES is respected (then --gpus is redundant). ──
+    if args.gpus and "CUDA_VISIBLE_DEVICES" not in os.environ:
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
+
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     gate_cache = args.gate_cache or args.out.replace(".json", f"_gated_{args.arm}.json")
     need_gate = not os.path.exists(gate_cache)
@@ -710,18 +722,16 @@ def main():
     from config import StitcherConfig
     import torch
     cfg = StitcherConfig()
-    # Device selection mirrors p4_length / p4_1: --gpus picks LOGICAL indices within
-    # CUDA_VISIBLE_DEVICES (default = every visible GPU), --device-map balanced_low_0
-    # spreads the weights across all of them (keeping GPU0 light for the forward pass) —
-    # the placement that avoids the front-packing OOM. Pin to free GPUs to dodge busy ones.
-    if args.gpus:
-        devices = tuple(int(x) for x in args.gpus.split(","))
-    else:
-        devices = tuple(range(torch.cuda.device_count()))
-        if not devices:
-            raise RuntimeError("no CUDA devices visible — set CUDA_VISIBLE_DEVICES")
+    # Always shard over the contiguous logical set 0..N-1 of whatever is visible (physical
+    # selection already done above). device_map=balanced_low_0 spreads the weights across
+    # every GPU and keeps GPU0 light for the forward pass — the placement that avoids the
+    # front-packing OOM.
+    devices = tuple(range(torch.cuda.device_count()))
+    if not devices:
+        raise RuntimeError("no CUDA devices visible — set CUDA_VISIBLE_DEVICES or --gpus")
     print(f"sharding DeepSeek-70B across {len(devices)} GPU(s): {devices} "
-          f"(device_map={args.device_map}, max_mem_per_gpu={args.max_mem_per_gpu})")
+          f"(CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES', '<all>')}, "
+          f"device_map={args.device_map}, max_mem_per_gpu={args.max_mem_per_gpu})")
     tok, model = load_deepseek(cfg, devices=devices, device_map=args.device_map,
                                max_memory_per_gpu=args.max_mem_per_gpu)
     _report_gpu_placement(model)
