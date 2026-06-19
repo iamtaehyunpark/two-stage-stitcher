@@ -212,14 +212,18 @@ and synthetic agreement (4). Word-boundary scoring (not substring) is mandatory 
 refusal can't score a yes/no answer.
 
 ```bash
-# the main arm (gate is resumable; cached to p5_gated_hotpot.json)
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python proofs/p5_latent_vs_rag.py \
-    --arm hotpot --max-candidates 400 --out proofs/data/p5.json
-# the synthetic control + the single-hop parity control
-python proofs/p5_latent_vs_rag.py --arm synth_multihop --out proofs/data/p5_synth.json
-python proofs/p5_latent_vs_rag.py --arm synth_parity   --out proofs/data/p5_parity.json
+# 0. one-time: build the HotpotQA cache on CPU (needs `datasets`) so the GPU runs never
+#    import it, and install the retriever dep:  pip install datasets sentence-transformers
+python proofs/hotpot.py --max-items 500
+# 1. main arm. --gpus pins to FREE GPUs (dodge busy ones); gate is resumable
+#    (cached to p5_gated_hotpot.json). Run prints per-GPU weight placement to confirm spread.
+python proofs/p5_latent_vs_rag.py --arm hotpot --gpus 4,5,6,7 \
+    --max-candidates 400 --out proofs/data/p5.json
+# 2. the synthetic control + the single-hop parity control (same GPU pin)
+python proofs/p5_latent_vs_rag.py --arm synth_multihop --gpus 4,5,6,7 --out proofs/data/p5_synth.json
+python proofs/p5_latent_vs_rag.py --arm synth_parity   --gpus 4,5,6,7 --out proofs/data/p5_parity.json
 # cheap end-to-end wire test (no reasoning) before the real run
-python proofs/p5_latent_vs_rag.py --arm hotpot --max-candidates 30 --no-think
+python proofs/p5_latent_vs_rag.py --arm hotpot --gpus 4,5,6,7 --max-candidates 30 --no-think
 # re-score saved answers with current scorers (no GPU)
 python proofs/p5_latent_vs_rag.py --rescore proofs/data/p5.json
 ```

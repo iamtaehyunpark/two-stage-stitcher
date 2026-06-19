@@ -36,14 +36,14 @@ The numbers that decide the project:
       a gap there means the prompt framing flatters latent (the docnaive bug), and the
       multi-hop numbers aren't trustworthy until fixed.
 
-Usage:
-    CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python proofs/p5_latent_vs_rag.py \
-        --arm hotpot --max-candidates 400 --out proofs/data/p5.json
+Usage (--gpus pins to FREE GPUs, like p3_path/run_chain; default = all visible):
+    python proofs/p5_latent_vs_rag.py --arm hotpot --gpus 4,5,6,7 \
+        --max-candidates 400 --out proofs/data/p5.json
     # the synthetic control + the parity control:
-    ... python proofs/p5_latent_vs_rag.py --arm synth_multihop --out proofs/data/p5_synth.json
-    ... python proofs/p5_latent_vs_rag.py --arm synth_parity   --out proofs/data/p5_parity.json
+    ... python proofs/p5_latent_vs_rag.py --arm synth_multihop --gpus 4,5,6,7 --out proofs/data/p5_synth.json
+    ... python proofs/p5_latent_vs_rag.py --arm synth_parity   --gpus 4,5,6,7 --out proofs/data/p5_parity.json
     # wire-test the whole pipeline cheaply before committing GPU hours:
-    ... python proofs/p5_latent_vs_rag.py --arm hotpot --max-candidates 30 --no-think
+    ... python proofs/p5_latent_vs_rag.py --arm hotpot --gpus 4,5,6,7 --max-candidates 30 --no-think
     # re-score a saved run with the current scorers (no GPU):
     ... python proofs/p5_latent_vs_rag.py --rescore proofs/data/p5.json
 """
@@ -228,6 +228,26 @@ def _free_cuda():
         for i in range(torch.cuda.device_count()):
             with torch.cuda.device(i):
                 torch.cuda.empty_cache()
+
+
+def _report_gpu_placement(model):
+    """Print how many param tensors landed on each GPU and the memory now held, so you can
+    SEE the 70B is spread across the GPUs you asked for — not packed into the first two
+    (the device_map='sequential' front-packing trap that OOMs on long prefill / injection).
+    Mirrors `p4_length._report_gpu_placement`."""
+    import torch
+    from collections import Counter
+    counts = Counter()
+    for _name, p in model.named_parameters():
+        if p.device.type == "cuda":
+            counts[p.device.index] += 1
+    print("  GPU placement (param tensors / memory):")
+    for i in sorted(counts):
+        alloc = torch.cuda.memory_allocated(i) / 1e9 if torch.cuda.is_available() else 0
+        print(f"    cuda:{i}  {counts[i]:>4} tensors  {alloc:5.1f} GB")
+    if len(counts) <= 2:
+        print(f"    !!! only {len(counts)} GPU(s) hold weights — pass "
+              "--device-map balanced_low_0 (front-packed weights OOM on long prefill).")
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -602,6 +622,30 @@ def rescore(result):
     return result
 
 
+def _preflight(args, need_gate):
+    """Fail fast on missing optional deps, with the exact pip line, BEFORE loading the
+    70B. `datasets` is only needed when the hotpot arm has to build its prep cache;
+    `sentence-transformers` is needed for the BGE retriever in eval."""
+    missing = []
+    if args.rag_backend == "bge":
+        try:
+            import sentence_transformers  # noqa: F401
+        except ImportError:
+            missing.append("sentence-transformers")
+    if need_gate and args.arm == "hotpot" and not os.path.exists(hotpot.CACHE_PATH):
+        try:
+            import datasets  # noqa: F401
+        except ImportError:
+            missing.append("datasets")
+    if missing:
+        pip = sys.executable.replace("/bin/python", "/bin/pip") \
+            if "/bin/python" in sys.executable else "pip"
+        raise SystemExit(
+            f"missing dependencies for this run: {', '.join(missing)}\n"
+            f"  install into THIS env:  {pip} install {' '.join(missing)}\n"
+            "  (or pre-build the HotpotQA cache once on CPU: python proofs/hotpot.py)")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--rescore", default=None, metavar="PATH",
@@ -624,6 +668,13 @@ def main():
     ap.add_argument("--tune-k", type=int, default=4, help="k used during chunk tuning")
     ap.add_argument("--rag-device", default="cpu", help="device for the BGE retriever")
     ap.add_argument("--rag-backend", default="bge", choices=["bge", "hash"])
+    ap.add_argument("--gpus", default=None,
+                    help="comma-separated LOGICAL GPU indices within CUDA_VISIBLE_DEVICES "
+                         "(default = all visible). Pin to free GPUs to avoid busy ones.")
+    ap.add_argument("--device-map", default="balanced_low_0",
+                    help="layer placement; 'balanced_low_0' spreads weights across every "
+                         "GPU and keeps GPU0 light (needed to avoid the front-packing OOM).")
+    ap.add_argument("--max-mem-per-gpu", default="70GiB")
     ap.add_argument("--gate-cache", default=None,
                     help="path to cache/reuse the gated set (default derived from --out)")
     ap.add_argument("--out", default="proofs/data/p5.json")
@@ -645,25 +696,43 @@ def main():
 
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     gate_cache = args.gate_cache or args.out.replace(".json", f"_gated_{args.arm}.json")
+    need_gate = not os.path.exists(gate_cache)
+
+    # ── pre-flight: surface missing deps and resolve the candidate set on CPU BEFORE the
+    # 30s+ 70B load, so a missing `datasets` / `sentence-transformers` (or a HotpotQA
+    # download) fails fast instead of after a wasted model load. ──
+    _preflight(args, need_gate)
+    recs = None
+    if need_gate:
+        recs = load_candidates(args.arm, args)
+        print(f"[gate] resolved {len(recs)} {args.arm} candidates (pre-load)")
 
     from config import StitcherConfig
     import torch
     cfg = StitcherConfig()
-    devices = tuple(range(torch.cuda.device_count()))
-    if not devices:
-        raise RuntimeError("no CUDA devices visible — set CUDA_VISIBLE_DEVICES")
-    print(f"sharding DeepSeek-70B across {len(devices)} GPU(s): {devices}")
-    tok, model = load_deepseek(cfg, devices=devices, device_map="balanced_low_0",
-                               max_memory_per_gpu="70GiB")
+    # Device selection mirrors p4_length / p4_1: --gpus picks LOGICAL indices within
+    # CUDA_VISIBLE_DEVICES (default = every visible GPU), --device-map balanced_low_0
+    # spreads the weights across all of them (keeping GPU0 light for the forward pass) —
+    # the placement that avoids the front-packing OOM. Pin to free GPUs to dodge busy ones.
+    if args.gpus:
+        devices = tuple(int(x) for x in args.gpus.split(","))
+    else:
+        devices = tuple(range(torch.cuda.device_count()))
+        if not devices:
+            raise RuntimeError("no CUDA devices visible — set CUDA_VISIBLE_DEVICES")
+    print(f"sharding DeepSeek-70B across {len(devices)} GPU(s): {devices} "
+          f"(device_map={args.device_map}, max_mem_per_gpu={args.max_mem_per_gpu})")
+    tok, model = load_deepseek(cfg, devices=devices, device_map=args.device_map,
+                               max_memory_per_gpu=args.max_mem_per_gpu)
+    _report_gpu_placement(model)
 
     # ── gate (resumable) ──
-    if os.path.exists(gate_cache):
+    if not need_gate:
         with open(gate_cache) as f:
             cached = json.load(f)
         gated, gate_summary = cached["gated"], cached["summary"]
         print(f"[gate] loaded {len(gated)} gated items from {gate_cache}")
     else:
-        recs = load_candidates(args.arm, args)
         print(f"[gate] gating {len(recs)} {args.arm} candidates (think-on)…")
         gated, gate_summary = run_gate(model, tok, recs, args)
         with open(gate_cache, "w") as f:
