@@ -13,9 +13,11 @@ attentions and hidden states, and three view styles render them:
             state). Same-sentence tokens are pulled together and the full sentence
             floats as a label at each sentence's centroid. Attention is drawn as
             LINES between points (width/opacity ∝ score); nodes are colored by
-            cluster. Self-contained interactive HTML: drag to rotate, hover a node
-            for its token+cluster+sentence, CLICK a node to isolate just its links.
-            One 3D scene per requested layer.
+            cluster. Distinct highlight lines connect the SAME token (gold) or a
+            same-meaning token (magenta) recurring across different sentences. Self-
+            contained interactive HTML: drag to rotate, hover a node for its
+            token+cluster+sentence, CLICK a node to isolate just its links. One 3D
+            scene per requested layer.
   surface — the attention matrix as a 3D terrain (key × query × score).
   arc     — a flat bertviz-style arc diagram.
 
@@ -244,6 +246,57 @@ def sentence_pull(coords, sids, alpha):
     return out
 
 
+# coreference highlight kinds: 0 = same token (gold), 1 = same meaning (magenta)
+COREF_STYLE = [("rgba(240,170,20,0.95)", 5.0), ("rgba(220,70,200,0.85)", 3.0)]
+
+
+def coreference_links(labels, sids, H, mode, sim_thresh):
+    """Cross-sentence highlight links between separate nodes that mean the same:
+      kind 0 (same token) — identical content token recurring in a different
+        sentence; consecutive occurrences are chained.
+      kind 1 (same meaning) — different token whose layer hidden state is most
+        similar (cosine ≥ sim_thresh) in another sentence; one partner per token.
+    Returns deduped undirected [i, j, kind]."""
+    n = len(labels)
+    norm = [re.sub(r"[^a-z0-9]", "", l.strip().lower()) for l in labels]
+    links = []
+
+    if mode in ("same", "both"):
+        groups = {}
+        for i, key in enumerate(norm):
+            if key:
+                groups.setdefault(key, []).append(i)
+        for idxs in groups.values():
+            prev = None
+            for i in idxs:
+                if prev is not None and sids[i] != sids[prev]:
+                    links.append([prev, i, 0])
+                prev = i
+
+    if mode in ("meaning", "both") and H is not None and n > 1:
+        X = H.numpy().astype("float64")
+        Xn = X / (np.linalg.norm(X, axis=1, keepdims=True) + 1e-9)
+        S = Xn @ Xn.T
+        np.fill_diagonal(S, -1.0)
+        for i in range(n):
+            for j in np.argsort(-S[i])[:5]:
+                if S[i, j] < sim_thresh:
+                    break
+                if sids[i] == sids[int(j)] or norm[i] == norm[int(j)]:
+                    continue                       # same sentence or same token → skip
+                links.append([i, int(j), 1])
+                break
+
+    seen, out = set(), []
+    for i, j, k in links:
+        a, b = (i, j) if i < j else (j, i)
+        if (a, b, k) in seen:
+            continue
+        seen.add((a, b, k))
+        out.append([a, b, k])
+    return out
+
+
 def cluster_tokens(attn_2d, H, mode, n_clusters, seed=0):
     """Group the kept tokens into meaningful units → returns int label per token.
       attention — community detection (weighted label-propagation) on the symmetrized
@@ -418,7 +471,7 @@ def _hsl_to_rgb(h, s, l):
 
 
 def draw_graph3d_plotly(fig, row, col, labels, coords, attn_2d, cids, sids,
-                        sent_texts, args, smax):
+                        sent_texts, coref, args, smax):
     """Add one interactive 3D node-link scene and return its (metadata dict, n_edges).
     Nodes are colored by cluster (cids); same-sentence tokens are pulled together and
     the full sentence floats at each sentence centroid. Always emits the node trace +
@@ -470,6 +523,24 @@ def draw_graph3d_plotly(fig, row, col, labels, coords, attn_2d, cids, sids,
                       color=f"rgba(70,110,200,{0.08 + 0.72 * frac:.3f})"),
             hoverinfo="skip", showlegend=False), row=row, col=col)
 
+    # distinct cross-sentence highlight links (same token / same meaning): one trace
+    # per kind, always present so the click handler can repopulate them.
+    coref_idx, cX, cY, cZ = [], [], [], []
+    for kind, (kcolor, kwidth) in enumerate(COREF_STYLE):
+        xs, ys, zs = [], [], []
+        for i, j, k in coref:
+            if k != kind:
+                continue
+            xs += [float(coords[i, 0]), float(coords[j, 0]), None]
+            ys += [float(coords[i, 1]), float(coords[j, 1]), None]
+            zs += [float(coords[i, 2]), float(coords[j, 2]), None]
+        coref_idx.append(len(fig.data))
+        cX.append(xs); cY.append(ys); cZ.append(zs)
+        fig.add_trace(go.Scatter3d(
+            x=xs, y=ys, z=zs, mode="lines",
+            line=dict(width=kwidth, color=kcolor),
+            hoverinfo="skip", showlegend=False), row=row, col=col)
+
     # floating full-sentence labels at each sentence centroid
     if args.show_sentences:
         sx, sy, sz, st = [], [], [], []
@@ -487,7 +558,9 @@ def draw_graph3d_plotly(fig, row, col, labels, coords, attn_2d, cids, sids,
 
     meta = dict(node=node_idx, bins=bin_idx, edges=edges,
                 coords=np.round(coords, 4).tolist(), colors=colors,
-                labels=list(labels), origX=origX, origY=origY, origZ=origZ)
+                labels=list(labels), origX=origX, origY=origY, origZ=origZ,
+                coref=coref_idx, corefEdges=[[int(i), int(j), int(k)] for i, j, k in coref],
+                corefOrigX=cX, corefOrigY=cY, corefOrigZ=cZ)
     return meta, len(scores)
 
 
@@ -507,10 +580,26 @@ function findPanel(cn) {
   for (var k = 0; k < PANELS.length; k++) if (PANELS[k].node === cn) return PANELS[k];
   return null;
 }
+function rebuild(p, traceIdx, edgeList, sel) {
+  // set each trace to only the edges (from edgeList, tagged by 3rd field) incident
+  // to `sel`; sel<0 means show all. tag t maps to traceIdx[t].
+  for (var t = 0; t < traceIdx.length; t++) {
+    var xs = [], ys = [], zs = [];
+    edgeList.forEach(function (e) {
+      if (e[2] !== t) return;
+      if (sel >= 0 && e[0] !== sel && e[1] !== sel) return;
+      var a = p.coords[e[0]], d = p.coords[e[1]];
+      xs.push(a[0], d[0], null); ys.push(a[1], d[1], null); zs.push(a[2], d[2], null);
+    });
+    Plotly.restyle(gd, {x: [xs], y: [ys], z: [zs]}, [traceIdx[t]]);
+  }
+}
 function resetPanel(p) {
   Plotly.restyle(gd, {'marker.color': [p.colors.slice()], 'text': [p.labels.slice()]}, [p.node]);
   for (var b = 0; b < p.bins.length; b++)
     Plotly.restyle(gd, {x: [p.origX[b]], y: [p.origY[b]], z: [p.origZ[b]]}, [p.bins[b]]);
+  for (var c = 0; c < p.coref.length; c++)
+    Plotly.restyle(gd, {x: [p.corefOrigX[c]], y: [p.corefOrigY[c]], z: [p.corefOrigZ[c]]}, [p.coref[c]]);
   p.sel = null;
 }
 function select(p, clicked) {
@@ -521,20 +610,17 @@ function select(p, clicked) {
     if (e[0] === clicked) nb[e[1]] = 1;
     if (e[1] === clicked) nb[e[0]] = 1;
   });
+  p.corefEdges.forEach(function (e) {                   // coref partners count too
+    if (e[0] === clicked) nb[e[1]] = 1;
+    if (e[1] === clicked) nb[e[0]] = 1;
+  });
   var colors = p.colors.map(function (c, i) {
     return (i === clicked) ? 'rgba(220,30,30,1)' : (nb[i] ? c : 'rgba(200,200,200,0.06)');
   });
   var text = p.labels.map(function (t, i) { return nb[i] ? t : ''; });
   Plotly.restyle(gd, {'marker.color': [colors], 'text': [text]}, [p.node]);
-  for (var b = 0; b < p.bins.length; b++) {
-    var xs = [], ys = [], zs = [];
-    p.edges.forEach(function (e) {
-      if (e[2] !== b || (e[0] !== clicked && e[1] !== clicked)) return;
-      var a = p.coords[e[0]], d = p.coords[e[1]];
-      xs.push(d[0], a[0], null); ys.push(d[1], a[1], null); zs.push(d[2], a[2], null);
-    });
-    Plotly.restyle(gd, {x: [xs], y: [ys], z: [zs]}, [p.bins[b]]);
-  }
+  rebuild(p, p.bins, p.edges, clicked);
+  rebuild(p, p.coref, p.corefEdges, clicked);
 }
 gd.on('plotly_hover', function (e) { if (e.points && e.points.length) lastHover = e.points[0]; });
 gd.on('plotly_unhover', function () { lastHover = null; });
@@ -590,7 +676,7 @@ def render_graph3d(labels, attns, hiddens, args):
     fig = make_subplots(rows=nrows, cols=ncols, specs=specs,
                         subplot_titles=[t for t, _ in panels])
 
-    metas, total, ncl = [], 0, 0
+    metas, total, ncl, ncoref = [], 0, 0, 0
     for idx, (title, mat) in enumerate(panels):
         L = resolve_layer(args.layers[0] if args.per_head else args.layers[idx],
                           len(fattns))
@@ -604,9 +690,14 @@ def render_graph3d(labels, attns, hiddens, args):
             cids = cluster_tokens(omit(mat, args), fhiddens[L + 1],
                                   args.cluster, args.n_clusters)
         ncl = max(ncl, len(set(int(c) for c in cids)))
+        # 4) cross-sentence highlight links (same token / same meaning)
+        coref = ([] if args.coref == "none" else
+                 coreference_links(flabels, fsids, fhiddens[L + 1],
+                                   args.coref, args.synonym_sim))
+        ncoref += len(coref)
         meta, ne = draw_graph3d_plotly(fig, idx // ncols + 1, idx % ncols + 1,
                                        flabels, coords, mat, cids, fsids,
-                                       sent_texts, args, smax)
+                                       sent_texts, coref, args, smax)
         metas.append(meta)
         total += ne
 
@@ -615,16 +706,20 @@ def render_graph3d(labels, attns, hiddens, args):
                       yaxis=dict(showticklabels=False),
                       zaxis=dict(showticklabels=False), aspectmode="cube")
     clu = "off" if args.cluster == "none" else f"{args.cluster} (~{ncl} clusters)"
+    sub = ("  —  click a node to isolate its links · gold = same token across "
+           "sentences, magenta = same meaning" if args.coref != "none"
+           else "  —  click a node to isolate its links")
     fig.update_layout(
         title=(args.title or f"3D token graph · {args.model} · {args.proj.upper()} proj")
-              + "  —  click a node to isolate its links",
+              + sub,
         height=560 * nrows, width=640 * ncols, margin=dict(l=0, r=0, t=60, b=0),
         paper_bgcolor="white")
 
     click_js = _CLICK_JS.replace("__PANELS__", json.dumps(metas))
     fig.write_html(args.out, include_plotlyjs=True, full_html=True, post_script=click_js)
-    print(f"saved {args.out}  ({n} scenes, {total} edges, {len(flabels)} tokens, "
-          f"proj={args.proj}, clustering={clu}) — drag to rotate, click to isolate")
+    print(f"saved {args.out}  ({n} scenes, {total} edges, {ncoref} coref links, "
+          f"{len(flabels)} tokens, proj={args.proj}, clustering={clu}) — "
+          f"drag to rotate, click to isolate")
 
 
 # ── rendering ───────────────────────────────────────────────────────────────────
@@ -920,6 +1015,13 @@ def main():
                    help="hide the floating sentence labels")
     p.add_argument("--sentence-chars", type=int, default=80,
                    help="max chars of each sentence shown in its floating label")
+    p.add_argument("--coref", choices=["same", "meaning", "both", "none"],
+                   default="both",
+                   help="distinct cross-sentence highlight links: same=identical "
+                        "token recurring in another sentence (gold); meaning=most "
+                        "similar token in another sentence (magenta); both; none")
+    p.add_argument("--synonym-sim", type=float, default=0.6,
+                   help="cosine threshold for --coref meaning/both (0..1, default 0.6)")
     p.add_argument("--backend", choices=["auto", "plotly", "matplotlib"],
                    default="auto",
                    help="surface/arc only: auto = .html→plotly, else static image")
