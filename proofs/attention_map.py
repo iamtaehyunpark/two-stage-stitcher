@@ -541,19 +541,31 @@ def draw_graph3d_plotly(fig, row, col, labels, coords, attn_2d, cids, sids,
             line=dict(width=kwidth, color=kcolor),
             hoverinfo="skip", showlegend=False), row=row, col=col)
 
-    # floating full-sentence labels at each sentence centroid
+    # sentences: a faint THREAD through each sentence's tokens in reading order, and
+    # the full-sentence label anchored at the sentence MEDOID (a real token, never
+    # the empty geometric centroid that left labels floating in the middle of nowhere)
     if args.show_sentences:
-        sx, sy, sz, st = [], [], [], []
         sa = np.asarray(sids)
+        tx, ty, tz = [], [], []                       # thread segments
+        lx, ly, lz, lt = [], [], [], []               # label anchors
         for s in np.unique(sa):
-            m = sa == s
-            c = coords[m].mean(0)
-            sx.append(float(c[0])); sy.append(float(c[1]))
-            sz.append(float(c[2]) + 0.07)
-            st.append("<i>" + _wrap(sent_texts[int(s)], args.sentence_chars) + "</i>")
+            idx = np.where(sa == s)[0]
+            for a, b in zip(idx[:-1], idx[1:]):       # reading-order thread
+                tx += [float(coords[a, 0]), float(coords[b, 0]), None]
+                ty += [float(coords[a, 1]), float(coords[b, 1]), None]
+                tz += [float(coords[a, 2]), float(coords[b, 2]), None]
+            pts = coords[idx]                          # medoid = most central token
+            med = idx[int(np.linalg.norm(pts[:, None] - pts[None], axis=-1).sum(1).argmin())]
+            lx.append(float(coords[med, 0])); ly.append(float(coords[med, 1]))
+            lz.append(float(coords[med, 2]) + 0.05)
+            lt.append("<i>" + _wrap(sent_texts[int(s)], args.sentence_chars) + "</i>")
         fig.add_trace(go.Scatter3d(
-            x=sx, y=sy, z=sz, mode="text", text=st,
-            textfont=dict(size=10, color="rgba(35,35,35,0.85)"),
+            x=tx, y=ty, z=tz, mode="lines",
+            line=dict(width=1.4, color="rgba(120,120,120,0.35)"),
+            hoverinfo="skip", showlegend=False), row=row, col=col)
+        fig.add_trace(go.Scatter3d(
+            x=lx, y=ly, z=lz, mode="text", text=lt,
+            textfont=dict(size=10, color="rgba(30,30,30,0.9)"),
             hoverinfo="skip", showlegend=False), row=row, col=col)
 
     meta = dict(node=node_idx, bins=bin_idx, edges=edges,
@@ -1006,9 +1018,9 @@ def main():
                    default=True, help="drop stopwords before the graph (default on)")
     p.add_argument("--keep-stopwords", dest="drop_stopwords", action="store_false",
                    help="keep stopwords/function words in the graph")
-    p.add_argument("--sentence-pull", type=float, default=0.45,
-                   help="0..1 cohesion pulling same-sentence tokens together "
-                        "(0 = off, default 0.45)")
+    p.add_argument("--sentence-pull", type=float, default=0.6,
+                   help="0..1 cohesion pulling same-sentence tokens together so each "
+                        "sentence reads as a tight group (0 = off, default 0.6)")
     p.add_argument("--show-sentences", dest="show_sentences", action="store_true",
                    default=True, help="float the full sentence text on the map (on)")
     p.add_argument("--no-sentences", dest="show_sentences", action="store_false",
