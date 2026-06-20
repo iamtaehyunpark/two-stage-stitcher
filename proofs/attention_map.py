@@ -1,42 +1,46 @@
 """
-Side experiment — visualize the attention map at chosen layers.
+Side experiment — visualize a model's attention as a real 3D token graph.
 
 Not a receiver-validation proof; a diagnostic/illustration that reuses the
 project's own models (`StitcherConfig.source_model` by default — Qwen2.5-7B, the
-stitcher's *source* side, which fits on one GPU). For a given input string it
-runs one forward pass with attentions exposed, then draws, per requested layer,
-a bertviz-style arc diagram: the token sequence down both sides, an arc from key
-token j to query token i whose **line weight and opacity grow with the attention
-score**. Weak, structural, or sink attention is omitted so only the edges that
-actually carry signal remain visible.
+stitcher's *source* side, which fits on one GPU). One forward pass exposes both
+attentions and hidden states, and three view styles render them:
+
+  graph   (default) — the REAL 3D view: every token is projected to a point in 3D
+            space (PCA — or UMAP — of its layer hidden state, so related tokens sit
+            near each other), and attention is drawn as LINES between those points,
+            each line's width/opacity growing with the score. Written as a
+            self-contained interactive HTML: drag to rotate, scroll to zoom, hover a
+            node for its token. One 3D scene per requested layer.
+  surface — the attention matrix as a 3D terrain (key × query × score).
+  arc     — a flat bertviz-style arc diagram.
 
 Why "eager". SDPA / FlashAttention fuse the softmax and never materialize the
 [heads, q, k] weight matrix, so `output_attentions=True` silently returns None
 under them. We force `attn_implementation="eager"` — slower, but it is the only
 implementation that hands back the weights we are here to look at.
 
-What gets omitted (the "meaningless attention" the prompt asks to drop):
-  --drop-first   the attention *sink*: almost every head dumps mass on token 0
-                 (here, the BOS/first token). Kept it would dominate every plot
-                 and hide the content-bearing edges. On by default.
-  --no-self      the diagonal i→i self-loops. On by default.
-  --threshold T  any edge below score T is dropped (absolute cut).
-  --top-k K      additionally, per query keep only its K strongest remaining keys.
-Aggregation across heads is mean by default (`--heads mean`); pass an explicit
-list (`--heads 3 7 12`) to average a subset, or `--per-head` to draw every head
-of a single layer as its own panel instead.
+What gets omitted (the "meaningless attention" to drop):
+  --drop-first/--keep-first   the attention *sink* on token 0 (dropped by default).
+  --drop-self/--keep-self     the i→i self-loops (kept only in the surface terrain).
+  --threshold T               any edge below score T is dropped (absolute cut).
+  --top-k K                   per query keep only its K strongest keys (great for
+                              decluttering the 3D graph).
+Heads are mean-aggregated (`--heads mean`); pass a subset (`--heads 3 7 12`) or
+`--per-head` for one scene/panel per head of a single layer.
 
 Usage:
+    # interactive 3D token graph (default) — open the .html in a browser
     python proofs/attention_map.py \
         --text "The Eiffel Tower is in Paris. It was completed in 1889." \
-        --layers 0 14 27 --out proofs/data/attn_qwen.png
+        --layers 6 14 24 --top-k 3 --out proofs/data/attn_graph.html
 
-    # the target (DeepSeek-70B) side instead — needs the sharded GPUs:
-    python proofs/attention_map.py --model target --layers 20 40 60 \
-        --text-file some_doc.txt --out proofs/data/attn_deepseek.png
+    # cleaner clusters with UMAP (pip install umap-learn)
+    python proofs/attention_map.py --proj umap --layers 14 --out proofs/data/g.html
 
-    # every head of one layer, side by side:
-    python proofs/attention_map.py --layers 14 --per-head --out proofs/data/heads.png
+    # the matrix views instead
+    python proofs/attention_map.py --style surface --layers 4 14 24 --out s.html
+    python proofs/attention_map.py --style arc --layers 14 --out a.png
 """
 
 from __future__ import annotations   # `str | None` annotations on any 3.7+ interp
@@ -102,18 +106,22 @@ def load_model(cfg: StitcherConfig, which: str, model_name: str | None, device: 
 
 
 @torch.inference_mode()
-def get_attentions(model, tokenizer, text: str, max_length: int):
-    """One forward pass. Returns (token_labels, attentions) where attentions is a
-    tuple of length n_layers, each tensor [n_heads, seq, seq] on CPU float32."""
+def get_outputs(model, tokenizer, text: str, max_length: int):
+    """One forward pass. Returns (labels, attentions, hiddens):
+      attentions — tuple len n_layers, each [n_heads, seq, seq] on CPU float32.
+      hiddens    — tuple len n_layers+1, each [seq, hidden_dim] on CPU float32
+                   (index 0 is the embedding output; layer L's output is index L+1).
+                   These are what the graph view projects to 3D positions."""
     first_device = next(model.parameters()).device
     enc = tokenizer(text, return_tensors="pt", truncation=True, max_length=max_length)
     enc = {k: v.to(first_device) for k, v in enc.items()}
-    out = model(**enc, output_attentions=True)
+    out = model(**enc, output_attentions=True, output_hidden_states=True)
 
     ids = enc["input_ids"][0].tolist()
     labels = clean_token_labels(tokenizer, ids)
-    attns = tuple(a[0].float().cpu() for a in out.attentions)   # drop batch dim
-    return labels, attns
+    attns = tuple(a[0].float().cpu() for a in out.attentions)        # drop batch dim
+    hiddens = tuple(h[0].float().cpu() for h in out.hidden_states)
+    return labels, attns, hiddens
 
 
 def clean_token_labels(tokenizer, ids):
@@ -153,6 +161,124 @@ def select_edges(attn_2d, threshold, top_k, drop_first, no_self):
     qi, kj = torch.where(a > threshold)
     scores = a[qi, kj]
     return qi.tolist(), kj.tolist(), scores.tolist()
+
+
+# ── 3D token projection + graph ─────────────────────────────────────────────────
+def project_3d(H, method="pca", seed=0):
+    """Project token hidden states H [seq, dim] → coords [seq, 3]. Dependency-free
+    PCA (centered SVD, top-3 components) by default; UMAP if --proj umap and the
+    package is installed (better cluster separation, needs `pip install umap-learn`)."""
+    Hn = H.numpy().astype("float64")
+    if method == "umap":
+        try:
+            import umap
+        except ImportError:
+            raise SystemExit("--proj umap needs umap-learn (`pip install umap-learn`); "
+                             "or use --proj pca (no dependency)")
+        n = Hn.shape[0]
+        reducer = umap.UMAP(n_components=3, random_state=seed,
+                            n_neighbors=min(15, max(2, n - 1)))
+        coords = reducer.fit_transform(Hn)
+    else:
+        X = Hn - Hn.mean(0, keepdims=True)
+        # right singular vectors give the principal axes; project onto top 3
+        _U, _S, Vt = np.linalg.svd(X, full_matrices=False)
+        coords = X @ Vt[:3].T
+    # normalize each axis to a comparable cube so panels look consistent
+    coords = coords - coords.min(0, keepdims=True)
+    span = coords.max(0, keepdims=True)
+    span[span == 0] = 1.0
+    return coords / span
+
+
+def draw_graph3d_plotly(fig, row, col, labels, coords, attn_2d, args, smax, first):
+    """One interactive 3D node-link scene: tokens as points at their projected
+    coords, attention as lines between them. Bold/opaque line ∝ score."""
+    import plotly.graph_objects as go
+    seq = len(labels)
+    qi, kj, scores = select_edges(attn_2d, args.threshold, args.top_k,
+                                  args.drop_first, args.no_self)
+
+    # nodes: marker size ∝ attention received (in-degree), colored by token order
+    indeg = np.zeros(seq)
+    for j, s in zip(kj, scores):
+        indeg[j] += s
+    msize = 4.0 + 9.0 * (indeg / indeg.max() if indeg.max() > 0 else indeg)
+    fig.add_trace(go.Scatter3d(
+        x=coords[:, 0], y=coords[:, 1], z=coords[:, 2],
+        mode="markers+text", text=labels, textposition="top center",
+        textfont=dict(size=9),
+        marker=dict(size=msize, color=list(range(seq)), colorscale="Turbo",
+                    opacity=0.9, line=dict(width=0)),
+        customdata=np.arange(seq),
+        hovertemplate="#%{customdata}: <b>%{text}</b><extra></extra>",
+        showlegend=False), row=row, col=col)
+
+    if not scores:
+        return 0
+    # Variable line boldness: plotly width is per-trace, so bucket edges into a few
+    # strength bins — one line trace per bin, segments separated by None.
+    nbins = 4
+    bins = [[] for _ in range(nbins)]
+    for i, j, s in zip(qi, kj, scores):
+        b = min(nbins - 1, int(nbins * min(s / smax, 0.999))) if smax > 0 else 0
+        bins[b].append((i, j))
+    for b, pairs in enumerate(bins):
+        if not pairs:
+            continue
+        frac = (b + 1) / nbins
+        xs, ys, zs = [], [], []
+        for i, j in pairs:
+            xs += [coords[j, 0], coords[i, 0], None]      # key → query
+            ys += [coords[j, 1], coords[i, 1], None]
+            zs += [coords[j, 2], coords[i, 2], None]
+        fig.add_trace(go.Scatter3d(
+            x=xs, y=ys, z=zs, mode="lines",
+            line=dict(width=1.0 + 6.0 * frac,
+                      color=f"rgba(70,110,200,{0.08 + 0.72 * frac:.3f})"),
+            hoverinfo="skip", showlegend=False), row=row, col=col)
+    return len(scores)
+
+
+def render_graph3d(labels, attns, hiddens, args):
+    """Interactive 3D token graph → HTML: every token projected to a point in 3D
+    (PCA/UMAP of its layer hidden state), attention drawn as lines between points."""
+    try:
+        import plotly.graph_objects as go      # noqa: F401
+        from plotly.subplots import make_subplots
+    except ImportError:
+        raise SystemExit("the 3D token graph needs plotly — `pip install plotly`")
+
+    panels = build_panels(attns, args)          # (title, attn_2d) with layer in title
+    n = len(panels)
+    ncols = min(n, args.max_cols)
+    nrows = (n + ncols - 1) // ncols
+    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+
+    smax = max((float(omit(m, args).max()) for _, m in panels), default=1.0) or 1.0
+    specs = [[{"type": "scatter3d"} for _ in range(ncols)] for _ in range(nrows)]
+    fig = make_subplots(rows=nrows, cols=ncols, specs=specs,
+                        subplot_titles=[t for t, _ in panels])
+
+    total = 0
+    for idx, (title, mat) in enumerate(panels):
+        L = resolve_layer(args.layers[0] if args.per_head else args.layers[idx],
+                          len(attns))
+        coords = project_3d(hiddens[L + 1], args.proj)     # layer-L output states
+        total += draw_graph3d_plotly(fig, idx // ncols + 1, idx % ncols + 1,
+                                     labels, coords, mat, args, smax, idx == 0)
+
+    fig.update_scenes(xaxis_title="PC1", yaxis_title="PC2", zaxis_title="PC3",
+                      xaxis=dict(showticklabels=False),
+                      yaxis=dict(showticklabels=False),
+                      zaxis=dict(showticklabels=False), aspectmode="cube")
+    fig.update_layout(
+        title=args.title or f"3D token graph · {args.model} · {args.proj.upper()} proj",
+        height=560 * nrows, width=640 * ncols, margin=dict(l=0, r=0, t=60, b=0),
+        paper_bgcolor="white")
+    fig.write_html(args.out, include_plotlyjs=True, full_html=True)
+    print(f"saved {args.out}  ({n} 3D scenes, {total} edges, {len(labels)} tokens, "
+          f"proj={args.proj}) — drag to rotate, hover a node for its token")
 
 
 # ── rendering ───────────────────────────────────────────────────────────────────
@@ -259,9 +385,14 @@ def draw_surface_panel(ax, labels, attn_2d, title, args, zmax):
     ax.view_init(elev=args.elev, azim=args.azim)
 
 
-def render(labels, attns, args):
-    """Dispatch on backend: an .html out (or --backend plotly) → an interactive,
-    rotatable/zoomable/hover 3D map; anything else → a static matplotlib image."""
+def render(labels, attns, hiddens, args):
+    """Dispatch on style/backend:
+      --style graph  → interactive 3D token node-link graph (tokens projected to
+                       points in 3D, attention as lines between them) — the 'real 3D'.
+      --style surface/arc → matrix views (3D terrain or 2D arcs); .html out (or
+                       --backend plotly) gives the interactive terrain, else a PNG."""
+    if args.style == "graph":
+        return render_graph3d(labels, attns, hiddens, args)
     use_plotly = (args.backend == "plotly" or
                   (args.backend == "auto" and args.out.lower().endswith(".html")))
     if use_plotly:
@@ -417,11 +548,15 @@ def main():
                    help="'mean' (all heads) or an explicit head-index subset")
     p.add_argument("--per-head", action="store_true",
                    help="plot every head of a single layer instead of layer panels")
-    p.add_argument("--style", choices=["surface", "arc"], default="surface",
-                   help="surface=3D word→word terrain (default); arc=2D arc diagram")
+    p.add_argument("--style", choices=["graph", "surface", "arc"], default="graph",
+                   help="graph=interactive 3D token node-link graph (default); "
+                        "surface=3D matrix terrain; arc=2D arc diagram")
+    p.add_argument("--proj", choices=["pca", "umap"], default="pca",
+                   help="how to place tokens in 3D for --style graph "
+                        "(pca: no deps; umap: better clusters, needs umap-learn)")
     p.add_argument("--backend", choices=["auto", "plotly", "matplotlib"],
                    default="auto",
-                   help="auto: .html out → interactive plotly, else static image")
+                   help="surface/arc only: auto = .html→plotly, else static image")
     p.add_argument("--elev", type=float, default=35.0, help="3D view elevation")
     p.add_argument("--azim", type=float, default=-60.0, help="3D view azimuth")
     p.add_argument("--zmax-pct", type=float, default=99.0,
@@ -466,15 +601,17 @@ def main():
 
     # style-aware omission defaults (None == user didn't force it)
     if args.drop_first is None:
-        args.drop_first = True                     # sink hurts both views
+        args.drop_first = True                     # sink clutters every view
     if args.no_self is None:
-        args.no_self = (args.style == "arc")       # keep diagonal in 3D terrain
+        # the self-diagonal is real terrain in the surface view, but a meaningless
+        # zero-length edge in the graph and clutter in arcs — keep it only for surface
+        args.no_self = (args.style != "surface")
 
     cfg = StitcherConfig()
     tokenizer, model = load_model(cfg, args.model, args.model_name, args.device)
-    labels, attns = get_attentions(model, tokenizer, args.text, args.max_length)
+    labels, attns, hiddens = get_outputs(model, tokenizer, args.text, args.max_length)
     print(f"{len(attns)} layers · {attns[0].shape[0]} heads · seq_len {len(labels)}")
-    render(labels, attns, args)
+    render(labels, attns, hiddens, args)
 
 
 if __name__ == "__main__":
