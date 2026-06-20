@@ -66,9 +66,14 @@ DEFAULT_TEXT = (
 
 
 # ── model loading ───────────────────────────────────────────────────────────────
-def load_model(cfg: StitcherConfig, which: str, model_name: str | None):
+def load_model(cfg: StitcherConfig, which: str, model_name: str | None, device: str):
     """Load `source` (Qwen, single GPU) or `target` (DeepSeek-70B, sharded) with
-    attentions exposed. Eager attention is mandatory — see module docstring."""
+    attentions exposed. Eager attention is mandatory — see module docstring.
+
+    `device` is the single GPU for the source model. It is NOT inherited from
+    `cfg.source_device` (hardcoded to cuda:3 for the 4-GPU stitcher layout) — this
+    standalone experiment puts the SLM on whatever you expose, default cuda:0. So
+    `CUDA_VISIBLE_DEVICES=6 python … ` just works (GPU 6 is logical cuda:0)."""
     from transformers import AutoTokenizer, AutoModelForCausalLM
 
     dtype = getattr(torch, cfg.dtype)
@@ -76,7 +81,7 @@ def load_model(cfg: StitcherConfig, which: str, model_name: str | None):
     tokenizer = AutoTokenizer.from_pretrained(name)
 
     if which == "source":
-        device_map = cfg.source_device
+        device_map = device
         max_memory = None
     else:
         # mirror the env-faithful sharded placement the proofs use
@@ -90,7 +95,6 @@ def load_model(cfg: StitcherConfig, which: str, model_name: str | None):
         device_map=device_map,
         max_memory=max_memory,
         attn_implementation="eager",        # the whole point — return the weights
-        output_attentions=True,
     )
     model.eval()
     return tokenizer, model
@@ -277,6 +281,9 @@ def main():
     p.add_argument("--model", choices=["source", "target"], default="source",
                    help="source=Qwen (1 GPU), target=DeepSeek-70B (sharded)")
     p.add_argument("--model-name", default=None, help="override the HF model id")
+    p.add_argument("--device", default="cuda:0",
+                   help="GPU for the source SLM (default cuda:0; expose it with "
+                        "CUDA_VISIBLE_DEVICES). Ignored for --model target.")
     p.add_argument("--layers", type=int, nargs="+", default=[0, -1],
                    help="layer indices to plot (negatives count from the end)")
     p.add_argument("--heads", nargs="+", default=["mean"],
@@ -311,7 +318,7 @@ def main():
         args.heads = [int(h) for h in args.heads]
 
     cfg = StitcherConfig()
-    tokenizer, model = load_model(cfg, args.model, args.model_name)
+    tokenizer, model = load_model(cfg, args.model, args.model_name, args.device)
     labels, attns = get_attentions(model, tokenizer, args.text, args.max_length)
     print(f"{len(attns)} layers · {attns[0].shape[0]} heads · seq_len {len(labels)}")
     render(labels, attns, args)
