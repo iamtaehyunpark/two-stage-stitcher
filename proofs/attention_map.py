@@ -39,6 +39,8 @@ Usage:
     python proofs/attention_map.py --layers 14 --per-head --out proofs/data/heads.png
 """
 
+from __future__ import annotations   # `str | None` annotations on any 3.7+ interp
+
 import os
 import sys
 import argparse
