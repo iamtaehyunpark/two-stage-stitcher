@@ -47,6 +47,7 @@ from __future__ import annotations   # `str | None` annotations on any 3.7+ inte
 
 import os
 import sys
+import json
 import argparse
 from pathlib import Path
 
@@ -165,84 +166,180 @@ def select_edges(attn_2d, threshold, top_k, drop_first, no_self):
 
 # ── 3D token projection + graph ─────────────────────────────────────────────────
 def project_3d(H, method="pca", seed=0):
-    """Project token hidden states H [seq, dim] → coords [seq, 3]. Dependency-free
-    PCA (centered SVD, top-3 components) by default; UMAP if --proj umap and the
-    package is installed (better cluster separation, needs `pip install umap-learn`)."""
+    """Project token hidden states H [seq, dim] → coords [seq, 3].
+
+    Robust by design: LLMs park a massive-activation outlier on the first/sink
+    token, and an ordinary PCA lets that one token define PC1 — everyone else then
+    gets ~0 on PC1 and collapses into the PC2-PC3 plane (the "looks 2D" bug). So we
+    fit the principal axes on INLIER tokens only (median/MAD gate), project all
+    tokens onto those axes, then scale each axis by a robust spread and clip — one
+    extreme point lands at the cube edge instead of squashing the rest flat."""
     Hn = H.numpy().astype("float64")
+    n = Hn.shape[0]
     if method == "umap":
         try:
             import umap
         except ImportError:
             raise SystemExit("--proj umap needs umap-learn (`pip install umap-learn`); "
                              "or use --proj pca (no dependency)")
-        n = Hn.shape[0]
-        reducer = umap.UMAP(n_components=3, random_state=seed,
-                            n_neighbors=min(15, max(2, n - 1)))
-        coords = reducer.fit_transform(Hn)
-    else:
-        X = Hn - Hn.mean(0, keepdims=True)
-        # right singular vectors give the principal axes; project onto top 3
-        _U, _S, Vt = np.linalg.svd(X, full_matrices=False)
-        coords = X @ Vt[:3].T
-    # normalize each axis to a comparable cube so panels look consistent
-    coords = coords - coords.min(0, keepdims=True)
-    span = coords.max(0, keepdims=True)
+        coords = umap.UMAP(n_components=3, random_state=seed,
+                           n_neighbors=min(15, max(2, n - 1))).fit_transform(Hn)
+        return _robust_cube(coords)
+
+    center = np.median(Hn, axis=0, keepdims=True)
+    Xc = Hn - center
+    dist = np.linalg.norm(Xc, axis=1)
+    med = np.median(dist)
+    mad = np.median(np.abs(dist - med)) + 1e-9
+    inliers = dist <= med + 4.0 * 1.4826 * mad          # ~4σ robust gate
+    if inliers.sum() < max(4, int(0.5 * n)):            # keep enough to fit 3 axes
+        inliers = np.ones(n, dtype=bool)
+    Xin = Xc[inliers]
+    _U, _S, Vt = np.linalg.svd(Xin - Xin.mean(0, keepdims=True), full_matrices=False)
+    coords = Xc @ Vt[:3].T                              # project ALL onto inlier axes
+    return _robust_cube(coords)
+
+
+def _robust_cube(coords):
+    """Center on the median, scale each axis by a robust spread (90th-pct |dev|),
+    clip to ±2.5 so an outlier can't stretch an axis, then map into a [0,1] cube."""
+    c = np.asarray(coords, dtype="float64")
+    c = c - np.median(c, axis=0, keepdims=True)
+    scale = np.percentile(np.abs(c), 90, axis=0)
+    scale[scale == 0] = 1.0
+    c = np.clip(c / scale, -2.5, 2.5)
+    c = c - c.min(0, keepdims=True)
+    span = c.max(0, keepdims=True)
     span[span == 0] = 1.0
-    return coords / span
+    return c / span
 
 
-def draw_graph3d_plotly(fig, row, col, labels, coords, attn_2d, args, smax, first):
-    """One interactive 3D node-link scene: tokens as points at their projected
-    coords, attention as lines between them. Bold/opaque line ∝ score."""
+NBINS = 4   # edge strength buckets (controls line boldness, and click-rebuild)
+
+
+def _node_rgba(seq):
+    """A distinct color per token (hue sweep) as explicit rgba strings, so the
+    click handler can grey-out non-neighbours and restore them by swapping colors."""
+    out = []
+    for i in range(seq):
+        h = (i / max(1, seq - 1)) * 0.82                # red→violet sweep
+        r, g, b = _hsl_to_rgb(h, 0.62, 0.55)
+        out.append(f"rgba({r},{g},{b},0.95)")
+    return out
+
+
+def _hsl_to_rgb(h, s, l):
+    def f(n):
+        k = (n + h * 12) % 12
+        x = l - s * min(l, 1 - l) * max(-1, min(k - 3, 9 - k, 1))
+        return int(round(255 * x))
+    return f(0), f(8), f(4)
+
+
+def draw_graph3d_plotly(fig, row, col, labels, coords, attn_2d, args, smax):
+    """Add one interactive 3D node-link scene and return its (metadata dict, n_edges).
+    Always emits the node trace + NBINS edge traces (some may start empty) so the
+    click handler has a fixed set of traces to repopulate per bin."""
     import plotly.graph_objects as go
     seq = len(labels)
     qi, kj, scores = select_edges(attn_2d, args.threshold, args.top_k,
                                   args.drop_first, args.no_self)
 
-    # nodes: marker size ∝ attention received (in-degree), colored by token order
     indeg = np.zeros(seq)
     for j, s in zip(kj, scores):
         indeg[j] += s
-    msize = 4.0 + 9.0 * (indeg / indeg.max() if indeg.max() > 0 else indeg)
+    msize = (4.0 + 9.0 * (indeg / indeg.max())) if indeg.max() > 0 else np.full(seq, 4.0)
+    colors = _node_rgba(seq)
+
+    node_idx = len(fig.data)
     fig.add_trace(go.Scatter3d(
         x=coords[:, 0], y=coords[:, 1], z=coords[:, 2],
-        mode="markers+text", text=labels, textposition="top center",
-        textfont=dict(size=9),
-        marker=dict(size=msize, color=list(range(seq)), colorscale="Turbo",
-                    opacity=0.9, line=dict(width=0)),
+        mode="markers+text", text=list(labels), textposition="top center",
+        textfont=dict(size=9), marker=dict(size=msize, color=colors,
+                                           opacity=0.95, line=dict(width=0)),
         customdata=np.arange(seq),
         hovertemplate="#%{customdata}: <b>%{text}</b><extra></extra>",
         showlegend=False), row=row, col=col)
 
-    if not scores:
-        return 0
-    # Variable line boldness: plotly width is per-trace, so bucket edges into a few
-    # strength bins — one line trace per bin, segments separated by None.
-    nbins = 4
-    bins = [[] for _ in range(nbins)]
+    # bucket edges by strength; record (query, key, bin) for the click handler
+    edges = []
+    binned = [[] for _ in range(NBINS)]
     for i, j, s in zip(qi, kj, scores):
-        b = min(nbins - 1, int(nbins * min(s / smax, 0.999))) if smax > 0 else 0
-        bins[b].append((i, j))
-    for b, pairs in enumerate(bins):
-        if not pairs:
-            continue
-        frac = (b + 1) / nbins
+        b = min(NBINS - 1, int(NBINS * min(s / smax, 0.999))) if smax > 0 else 0
+        binned[b].append((i, j))
+        edges.append([int(i), int(j), int(b)])
+
+    bin_idx, origX, origY, origZ = [], [], [], []
+    for b in range(NBINS):
+        frac = (b + 1) / NBINS
         xs, ys, zs = [], [], []
-        for i, j in pairs:
-            xs += [coords[j, 0], coords[i, 0], None]      # key → query
-            ys += [coords[j, 1], coords[i, 1], None]
-            zs += [coords[j, 2], coords[i, 2], None]
+        for i, j in binned[b]:
+            xs += [float(coords[j, 0]), float(coords[i, 0]), None]   # key → query
+            ys += [float(coords[j, 1]), float(coords[i, 1]), None]
+            zs += [float(coords[j, 2]), float(coords[i, 2]), None]
+        bin_idx.append(len(fig.data))
+        origX.append(xs); origY.append(ys); origZ.append(zs)
         fig.add_trace(go.Scatter3d(
             x=xs, y=ys, z=zs, mode="lines",
             line=dict(width=1.0 + 6.0 * frac,
                       color=f"rgba(70,110,200,{0.08 + 0.72 * frac:.3f})"),
             hoverinfo="skip", showlegend=False), row=row, col=col)
-    return len(scores)
+
+    meta = dict(node=node_idx, bins=bin_idx, edges=edges,
+                coords=np.round(coords, 4).tolist(), colors=colors,
+                labels=list(labels), origX=origX, origY=origY, origZ=origZ)
+    return meta, len(scores)
+
+
+# JS injected into the HTML: click a node → show only its incident edges + label
+# its neighbours, grey everything else; click it again (or double-click the canvas)
+# to reset. Works per-panel via the PANELS trace-index map.
+_CLICK_JS = """
+var __divs = document.querySelectorAll('div.plotly-graph-div');
+var gd = __divs[__divs.length - 1];
+var PANELS = __PANELS__;
+function resetPanel(p) {
+  Plotly.restyle(gd, {'marker.color': [p.colors.slice()], 'text': [p.labels.slice()]}, [p.node]);
+  for (var b = 0; b < p.bins.length; b++)
+    Plotly.restyle(gd, {x: [p.origX[b]], y: [p.origY[b]], z: [p.origZ[b]]}, [p.bins[b]]);
+  p.sel = null;
+}
+gd.on('plotly_click', function (ev) {
+  if (!ev.points || !ev.points.length) return;
+  var pt = ev.points[0], cn = pt.curveNumber, clicked = pt.pointNumber;
+  var p = null;
+  for (var k = 0; k < PANELS.length; k++) if (PANELS[k].node === cn) { p = PANELS[k]; break; }
+  if (!p) return;                              // clicked an edge, not a node
+  if (p.sel === clicked) { resetPanel(p); return; }   // toggle off
+  p.sel = clicked;
+  var nb = {}; nb[clicked] = 1;
+  p.edges.forEach(function (e) {
+    if (e[0] === clicked) nb[e[1]] = 1;
+    if (e[1] === clicked) nb[e[0]] = 1;
+  });
+  var colors = p.colors.map(function (c, i) {
+    return (i === clicked) ? 'rgba(220,30,30,1)' : (nb[i] ? c : 'rgba(200,200,200,0.08)');
+  });
+  var text = p.labels.map(function (t, i) { return nb[i] ? t : ''; });
+  Plotly.restyle(gd, {'marker.color': [colors], 'text': [text]}, [p.node]);
+  for (var b = 0; b < p.bins.length; b++) {
+    var xs = [], ys = [], zs = [];
+    p.edges.forEach(function (e) {
+      if (e[2] !== b || (e[0] !== clicked && e[1] !== clicked)) return;
+      var a = p.coords[e[0]], d = p.coords[e[1]];
+      xs.push(d[0], a[0], null); ys.push(d[1], a[1], null); zs.push(d[2], a[2], null);
+    });
+    Plotly.restyle(gd, {x: [xs], y: [ys], z: [zs]}, [p.bins[b]]);
+  }
+});
+gd.on('plotly_doubleclick', function () { PANELS.forEach(resetPanel); });
+"""
 
 
 def render_graph3d(labels, attns, hiddens, args):
     """Interactive 3D token graph → HTML: every token projected to a point in 3D
-    (PCA/UMAP of its layer hidden state), attention drawn as lines between points."""
+    (PCA/UMAP of its layer hidden state), attention drawn as lines between points.
+    Nodes are clickable — click one to isolate just its connections."""
     try:
         import plotly.graph_objects as go      # noqa: F401
         from plotly.subplots import make_subplots
@@ -260,25 +357,30 @@ def render_graph3d(labels, attns, hiddens, args):
     fig = make_subplots(rows=nrows, cols=ncols, specs=specs,
                         subplot_titles=[t for t, _ in panels])
 
-    total = 0
+    metas, total = [], 0
     for idx, (title, mat) in enumerate(panels):
         L = resolve_layer(args.layers[0] if args.per_head else args.layers[idx],
                           len(attns))
         coords = project_3d(hiddens[L + 1], args.proj)     # layer-L output states
-        total += draw_graph3d_plotly(fig, idx // ncols + 1, idx % ncols + 1,
-                                     labels, coords, mat, args, smax, idx == 0)
+        meta, ne = draw_graph3d_plotly(fig, idx // ncols + 1, idx % ncols + 1,
+                                       labels, coords, mat, args, smax)
+        metas.append(meta)
+        total += ne
 
     fig.update_scenes(xaxis_title="PC1", yaxis_title="PC2", zaxis_title="PC3",
                       xaxis=dict(showticklabels=False),
                       yaxis=dict(showticklabels=False),
                       zaxis=dict(showticklabels=False), aspectmode="cube")
     fig.update_layout(
-        title=args.title or f"3D token graph · {args.model} · {args.proj.upper()} proj",
+        title=(args.title or f"3D token graph · {args.model} · {args.proj.upper()} proj")
+              + "  —  click a node to isolate its links",
         height=560 * nrows, width=640 * ncols, margin=dict(l=0, r=0, t=60, b=0),
         paper_bgcolor="white")
-    fig.write_html(args.out, include_plotlyjs=True, full_html=True)
+
+    click_js = _CLICK_JS.replace("__PANELS__", json.dumps(metas))
+    fig.write_html(args.out, include_plotlyjs=True, full_html=True, post_script=click_js)
     print(f"saved {args.out}  ({n} 3D scenes, {total} edges, {len(labels)} tokens, "
-          f"proj={args.proj}) — drag to rotate, hover a node for its token")
+          f"proj={args.proj}) — drag to rotate, click a node to isolate its links")
 
 
 # ── rendering ───────────────────────────────────────────────────────────────────
