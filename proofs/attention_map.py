@@ -55,6 +55,7 @@ import matplotlib
 matplotlib.use("Agg")                      # headless GPU box — no display
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
+from mpl_toolkits.mplot3d import Axes3D    # noqa: F401  (registers 3d projection)
 
 from config import StitcherConfig
 
@@ -203,54 +204,104 @@ def draw_panel(ax, labels, attn_2d, title, args, smax_global=None):
     return len(scores)
 
 
-def render(labels, attns, args):
-    """Build the figure: one panel per requested layer, or — with --per-head — one
-    panel per head of the single requested layer."""
+def build_panels(attns, args):
+    """Shared panel list: one (title, [seq,seq] matrix) per requested layer, or one
+    per head of a single layer with --per-head."""
     n_layers = len(attns)
-
     if args.per_head:
         if len(args.layers) != 1:
             raise SystemExit("--per-head needs exactly one --layers value")
         L = resolve_layer(args.layers[0], n_layers)
         heads = attns[L]                          # [n_heads, seq, seq]
-        panels = [(f"L{L} · head {h}", heads[h]) for h in range(heads.shape[0])]
-    else:
-        panels = []
-        for spec in args.layers:
-            L = resolve_layer(spec, n_layers)
-            panels.append((f"layer {L}", aggregate_heads(attns[L], args.heads)))
+        return [(f"L{L} · head {h}", heads[h]) for h in range(heads.shape[0])]
+    panels = []
+    for spec in args.layers:
+        L = resolve_layer(spec, n_layers)
+        panels.append((f"layer {L}", aggregate_heads(attns[L], args.heads)))
+    return panels
 
-    # one global scale so "bolder = stronger" is comparable across panels
-    smax_global = 0.0
-    for _, mat in panels:
-        a = mat.clone()
-        if args.drop_first:
-            a[:, 0] = 0.0
-        if args.no_self:
-            a.fill_diagonal_(0.0)
-        smax_global = max(smax_global, float(a.max()))
 
+def omit(mat, args):
+    """Apply the 'meaningless attention' omissions in-place on a clone: zero the
+    token-0 sink column and/or the self-diagonal per the flags. Shared by both
+    styles so the arc and surface views show the SAME matrix."""
+    a = mat.clone()
+    if args.drop_first:
+        a[:, 0] = 0.0
+    if args.no_self:
+        a.fill_diagonal_(0.0)
+    return a
+
+
+def draw_surface_panel(ax, labels, attn_2d, title, args, zmax):
+    """One 3D word→word panel: key tokens on X, query tokens on Y, attention score
+    as HEIGHT (Z). Local attention shows as a diagonal ridge, an anchor/sink token
+    as a wall along its key column, induction as off-diagonal stripes."""
+    seq = len(labels)
+    Z = omit(attn_2d, args).numpy()               # Z[query, key]
+    X, Y = np.meshgrid(np.arange(seq), np.arange(seq))
+    ax.plot_surface(X, Y, Z, cmap="viridis", vmin=0.0, vmax=zmax,
+                    rstride=1, cstride=1, linewidth=0.0, antialiased=True)
+    ax.set_zlim(0.0, zmax)
+    ax.set_title(title, fontsize=10, pad=0)
+
+    step = max(1, seq // args.max_ticks)          # thin labels so axes stay legible
+    ticks = list(range(0, seq, step))
+    ax.set_xticks(ticks)
+    ax.set_xticklabels([labels[i] for i in ticks], fontsize=6, rotation=90,
+                       va="center", ha="right")
+    ax.set_yticks(ticks)
+    ax.set_yticklabels([labels[i] for i in ticks], fontsize=6)
+    ax.set_xlabel("key (attended-to)", fontsize=8, labelpad=10)
+    ax.set_ylabel("query (attending)", fontsize=8, labelpad=10)
+    ax.set_zlabel("attn", fontsize=8)
+    ax.tick_params(labelsize=6, pad=-1)
+    ax.view_init(elev=args.elev, azim=args.azim)
+
+
+def render(labels, attns, args):
+    """Build the figure. --style arc → 2D arc panels; --style surface → 3D
+    word→word terrain panels. One panel per requested layer (or per head)."""
+    panels = build_panels(attns, args)
     n = len(panels)
     ncols = min(n, args.max_cols)
     nrows = (n + ncols - 1) // ncols
     seq = len(labels)
-    fig, axes = plt.subplots(
-        nrows, ncols,
-        figsize=(args.panel_width * ncols, max(3.0, 0.22 * seq) * nrows),
-        squeeze=False,
-    )
-    total_edges = 0
-    for idx, (title, mat) in enumerate(panels):
-        ax = axes[idx // ncols][idx % ncols]
-        total_edges += draw_panel(ax, labels, mat, title, args, smax_global)
-    for idx in range(n, nrows * ncols):            # blank unused cells
-        axes[idx // ncols][idx % ncols].axis("off")
-
-    fig.suptitle(args.title or f"Attention map · {args.model} model", fontsize=12)
-    fig.tight_layout(rect=(0, 0, 1, 0.98))
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+
+    if args.style == "surface":
+        # robust global z-scale: a high percentile of the displayed (post-omission)
+        # mass so one residual spike can't flatten every other panel.
+        vals = np.concatenate([omit(m, args).numpy().ravel() for _, m in panels])
+        pos = vals[vals > 0]
+        zmax = float(np.percentile(pos, args.zmax_pct)) if pos.size else 1.0
+        zmax = max(zmax, 1e-6)
+        fig = plt.figure(figsize=(args.panel_width * 1.7 * ncols,
+                                  args.panel_width * 1.5 * nrows))
+        for idx, (title, mat) in enumerate(panels):
+            ax = fig.add_subplot(nrows, ncols, idx + 1, projection="3d")
+            draw_surface_panel(ax, labels, mat, title, args, zmax)
+        note = f"{n} panels, z-scale@{args.zmax_pct}%={zmax:.3f}, seq_len={seq}"
+    else:
+        smax_global = max((float(omit(m, args).max()) for _, m in panels), default=0.0)
+        fig, axes = plt.subplots(
+            nrows, ncols,
+            figsize=(args.panel_width * ncols, max(3.0, 0.22 * seq) * nrows),
+            squeeze=False,
+        )
+        total_edges = 0
+        for idx, (title, mat) in enumerate(panels):
+            ax = axes[idx // ncols][idx % ncols]
+            total_edges += draw_panel(ax, labels, mat, title, args, smax_global)
+        for idx in range(n, nrows * ncols):        # blank unused cells
+            axes[idx // ncols][idx % ncols].axis("off")
+        note = f"{n} panels, {total_edges} edges, seq_len={seq}"
+
+    fig.suptitle(args.title or f"Attention · {args.model} model · {args.style}",
+                 fontsize=12)
+    fig.tight_layout(rect=(0, 0, 1, 0.98))
     fig.savefig(args.out, dpi=args.dpi, bbox_inches="tight")
-    print(f"saved {args.out}  ({n} panels, {total_edges} edges, seq_len={seq})")
+    print(f"saved {args.out}  ({note})")
 
 
 def aggregate_heads(layer_attn, heads_spec):
@@ -290,14 +341,31 @@ def main():
                    help="'mean' (all heads) or an explicit head-index subset")
     p.add_argument("--per-head", action="store_true",
                    help="plot every head of a single layer instead of layer panels")
+    p.add_argument("--style", choices=["surface", "arc"], default="surface",
+                   help="surface=3D word→word terrain (default); arc=2D arc diagram")
+    p.add_argument("--elev", type=float, default=35.0, help="3D view elevation")
+    p.add_argument("--azim", type=float, default=-60.0, help="3D view azimuth")
+    p.add_argument("--zmax-pct", type=float, default=99.0,
+                   help="3D height scale = this percentile of attention mass "
+                        "(lower → taller, more sensitive terrain)")
+    p.add_argument("--max-ticks", type=int, default=24,
+                   help="max token labels per 3D axis (thinned if seq is longer)")
     p.add_argument("--threshold", type=float, default=0.02,
                    help="omit edges with score below this (default 0.02)")
     p.add_argument("--top-k", type=int, default=None,
                    help="additionally keep only each query's K strongest keys")
-    p.add_argument("--keep-first", dest="drop_first", action="store_false",
-                   help="keep the token-0 attention sink (omitted by default)")
-    p.add_argument("--keep-self", dest="no_self", action="store_false",
-                   help="keep the i→i self-loops (omitted by default)")
+    # sink/diagonal omission. Defaults are style-aware (resolved below): the sink is
+    # dropped in both styles (it flattens the height scale / clutters arcs); the
+    # self-diagonal is KEPT in 3D (local attention is the clearest terrain pattern)
+    # but dropped in arcs. Either can be forced on/off explicitly.
+    p.add_argument("--drop-first", dest="drop_first", action="store_const", const=True,
+                   default=None, help="force-drop the token-0 attention sink")
+    p.add_argument("--keep-first", dest="drop_first", action="store_const", const=False,
+                   help="force-keep the token-0 attention sink")
+    p.add_argument("--drop-self", dest="no_self", action="store_const", const=True,
+                   default=None, help="force-drop the i→i self-diagonal")
+    p.add_argument("--keep-self", dest="no_self", action="store_const", const=False,
+                   help="force-keep the i→i self-diagonal")
     p.add_argument("--max-length", type=int, default=128,
                    help="truncate input to this many tokens (plots get dense fast)")
     p.add_argument("--max-cols", type=int, default=4)
@@ -305,7 +373,6 @@ def main():
     p.add_argument("--dpi", type=int, default=150)
     p.add_argument("--title", default=None)
     p.add_argument("--out", default="proofs/data/attention_map.png")
-    p.set_defaults(drop_first=True, no_self=True)
     args = p.parse_args()
 
     if args.text_file:
@@ -316,6 +383,12 @@ def main():
         args.heads = "mean"                       # all heads
     else:
         args.heads = [int(h) for h in args.heads]
+
+    # style-aware omission defaults (None == user didn't force it)
+    if args.drop_first is None:
+        args.drop_first = True                     # sink hurts both views
+    if args.no_self is None:
+        args.no_self = (args.style == "arc")       # keep diagonal in 3D terrain
 
     cfg = StitcherConfig()
     tokenizer, model = load_model(cfg, args.model, args.model_name, args.device)
