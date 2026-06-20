@@ -6,12 +6,14 @@ project's own models (`StitcherConfig.source_model` by default — Qwen2.5-7B, t
 stitcher's *source* side, which fits on one GPU). One forward pass exposes both
 attentions and hidden states, and three view styles render them:
 
-  graph   (default) — the REAL 3D view: every token is projected to a point in 3D
-            space (PCA — or UMAP — of its layer hidden state, so related tokens sit
-            near each other), and attention is drawn as LINES between those points,
-            each line's width/opacity growing with the score. Written as a
-            self-contained interactive HTML: drag to rotate, scroll to zoom, hover a
-            node for its token. One 3D scene per requested layer.
+  graph   (default) — the REAL 3D view: stopwords/punctuation/specials are dropped,
+            the surviving content tokens are clustered into meaningful units
+            (attention-graph communities, or k-means on hidden states), and each
+            token is projected to a point in 3D (PCA — or UMAP — of its layer hidden
+            state). Attention is drawn as LINES between points (width/opacity ∝
+            score); nodes are colored by cluster. Self-contained interactive HTML:
+            drag to rotate, hover a node for its token+cluster, CLICK a node to
+            isolate just its links. One 3D scene per requested layer.
   surface — the attention matrix as a 3D terrain (key × query × score).
   arc     — a flat bertviz-style arc diagram.
 
@@ -30,13 +32,15 @@ Heads are mean-aggregated (`--heads mean`); pass a subset (`--heads 3 7 12`) or
 `--per-head` for one scene/panel per head of a single layer.
 
 Usage:
-    # interactive 3D token graph (default) — open the .html in a browser
+    # interactive 3D token graph (default): stopwords dropped, attention-community
+    # clustering, click a node to isolate its links — open the .html in a browser
     python proofs/attention_map.py \
         --text "The Eiffel Tower is in Paris. It was completed in 1889." \
         --layers 6 14 24 --top-k 3 --out proofs/data/attn_graph.html
 
-    # cleaner clusters with UMAP (pip install umap-learn)
-    python proofs/attention_map.py --proj umap --layers 14 --out proofs/data/g.html
+    # cluster by semantic similarity instead, with UMAP layout
+    python proofs/attention_map.py --cluster embedding --proj umap \
+        --layers 14 --out proofs/data/g.html
 
     # the matrix views instead
     python proofs/attention_map.py --style surface --layers 4 14 24 --out s.html
@@ -137,6 +141,116 @@ def clean_token_labels(tokenizer, ids):
     return labels
 
 
+# ── stopwords + clustering ──────────────────────────────────────────────────────
+STOPWORDS = set("""
+a an the this that these those of in on at to for from by with about as into over
+after before under above between out off up down and or but nor so yet if then else
+than is are was were be been being am do does did doing have has had having will would
+shall should can could may might must not no nor i you he she it we they me him her us
+them my your his its our their mine yours hers ours theirs who whom which what whose
+when where why how there here all any both each few more most other some such only own
+same too very s t can just don now also which while because
+""".split())
+
+
+def _is_dropped_token(label, drop_stopwords):
+    """A token is dropped if it's a special/BOS token, punctuation/whitespace only, or
+    (when enabled) a stopword. Subword fragments of content words are kept — stopwords
+    are whole tokens, so matching the cleaned label is enough."""
+    t = label.strip()
+    if not t:
+        return True
+    if t.startswith("<") and t.endswith(">"):      # <|im_start|>, <|endoftext|>, …
+        return True
+    if t.startswith("\\n"):                          # rendered newline tokens
+        return True
+    if not any(ch.isalnum() for ch in t):            # punctuation only
+        return True
+    if drop_stopwords and t.lower() in STOPWORDS:
+        return True
+    return False
+
+
+def keep_indices(labels, drop_stopwords):
+    """Indices of tokens to visualize. Token 0 (BOS / attention sink) is always
+    dropped — it's never a content word and is the projection outlier."""
+    keep = [i for i, lab in enumerate(labels)
+            if i != 0 and not _is_dropped_token(lab, drop_stopwords)]
+    return keep or list(range(len(labels)))          # never return empty
+
+
+def cluster_tokens(attn_2d, H, mode, n_clusters, seed=0):
+    """Group the kept tokens into meaningful units → returns int label per token.
+      attention — community detection (weighted label-propagation) on the symmetrized
+                  attention graph: tokens that attend to each other land together.
+      embedding — k-means on the layer hidden states: semantically related words.
+    Both are dependency-free."""
+    n = (attn_2d.shape[0] if mode == "attention" else H.shape[0])
+    if n <= 2:
+        return np.zeros(n, dtype=int)
+    if mode == "embedding":
+        return _kmeans(H.numpy().astype("float64"), n_clusters or _auto_k(n), seed)
+    return _label_prop(attn_2d.numpy().astype("float64"))
+
+
+def _auto_k(n):
+    return max(2, min(8, n // 5))
+
+
+def _kmeans(X, k, seed=0, iters=50):
+    """Plain Lloyd k-means with k-means++ init (numpy only, deterministic by seed)."""
+    n = X.shape[0]
+    k = max(1, min(k, n))
+    rng = np.random.default_rng(seed)
+    # k-means++ seeding
+    centers = [int(rng.integers(n))]
+    for _ in range(1, k):
+        d2 = np.min(((X[:, None, :] - X[None, centers, :]) ** 2).sum(-1), axis=1)
+        probs = d2 / (d2.sum() + 1e-12)
+        centers.append(int(rng.choice(n, p=probs)))
+    C = X[centers].copy()
+    labels = np.zeros(n, dtype=int)
+    for _ in range(iters):
+        d = ((X[:, None, :] - C[None, :, :]) ** 2).sum(-1)
+        new = d.argmin(1)
+        if np.array_equal(new, labels):
+            break
+        labels = new
+        for c in range(k):
+            m = labels == c
+            if m.any():
+                C[c] = X[m].mean(0)
+    _u, inv = np.unique(labels, return_inverse=True)
+    return inv
+
+
+def _label_prop(A, iters=30):
+    """Weighted async label-propagation community detection on adjacency A. Each node
+    adopts the label carrying the most attention weight among its neighbours; ties
+    break to the lowest label for determinism. Isolated nodes stay singletons."""
+    n = A.shape[0]
+    W = A + A.T
+    np.fill_diagonal(W, 0.0)
+    lab = np.arange(n)
+    for _ in range(iters):
+        changed = False
+        for i in range(n):
+            nz = np.nonzero(W[i])[0]
+            if nz.size == 0:
+                continue
+            sums = {}
+            for j in nz:
+                sums[lab[j]] = sums.get(lab[j], 0.0) + W[i, j]
+            best = max(sums.items(), key=lambda kv: (kv[1], -kv[0]))[0]
+            if best != lab[i]:
+                lab[i] = best
+                changed = True
+        if not changed:
+            break
+    _u, inv = np.unique(lab, return_inverse=True)
+    return inv
+
+
 # ── edge selection (the "omit meaningless attention" logic) ─────────────────────
 def select_edges(attn_2d, threshold, top_k, drop_first, no_self):
     """attn_2d: [seq, seq] aggregated scores (rows=query i, cols=key j, causal so
@@ -217,13 +331,15 @@ def _robust_cube(coords):
 NBINS = 4   # edge strength buckets (controls line boldness, and click-rebuild)
 
 
-def _node_rgba(seq):
-    """A distinct color per token (hue sweep) as explicit rgba strings, so the
-    click handler can grey-out non-neighbours and restore them by swapping colors."""
+def _cluster_rgba(cids):
+    """One distinct color per CLUSTER (golden-angle hue spacing) as explicit rgba
+    strings, so co-clustered tokens share a color and the click handler can grey-out
+    non-neighbours and restore them by swapping colors."""
+    uniq = sorted(set(int(c) for c in cids))
+    hue = {c: (i * 0.61803) % 1.0 for i, c in enumerate(uniq)}
     out = []
-    for i in range(seq):
-        h = (i / max(1, seq - 1)) * 0.82                # red→violet sweep
-        r, g, b = _hsl_to_rgb(h, 0.62, 0.55)
+    for c in cids:
+        r, g, b = _hsl_to_rgb(hue[int(c)], 0.62, 0.55)
         out.append(f"rgba({r},{g},{b},0.95)")
     return out
 
@@ -236,10 +352,11 @@ def _hsl_to_rgb(h, s, l):
     return f(0), f(8), f(4)
 
 
-def draw_graph3d_plotly(fig, row, col, labels, coords, attn_2d, args, smax):
+def draw_graph3d_plotly(fig, row, col, labels, coords, attn_2d, cids, args, smax):
     """Add one interactive 3D node-link scene and return its (metadata dict, n_edges).
-    Always emits the node trace + NBINS edge traces (some may start empty) so the
-    click handler has a fixed set of traces to repopulate per bin."""
+    Nodes are colored by cluster (cids). Always emits the node trace + NBINS edge
+    traces (some may start empty) so the click handler has a fixed set of traces to
+    repopulate per bin."""
     import plotly.graph_objects as go
     seq = len(labels)
     qi, kj, scores = select_edges(attn_2d, args.threshold, args.top_k,
@@ -249,7 +366,7 @@ def draw_graph3d_plotly(fig, row, col, labels, coords, attn_2d, args, smax):
     for j, s in zip(kj, scores):
         indeg[j] += s
     msize = (4.0 + 9.0 * (indeg / indeg.max())) if indeg.max() > 0 else np.full(seq, 4.0)
-    colors = _node_rgba(seq)
+    colors = _cluster_rgba(cids)
 
     node_idx = len(fig.data)
     fig.add_trace(go.Scatter3d(
@@ -257,8 +374,9 @@ def draw_graph3d_plotly(fig, row, col, labels, coords, attn_2d, args, smax):
         mode="markers+text", text=list(labels), textposition="top center",
         textfont=dict(size=9), marker=dict(size=msize, color=colors,
                                            opacity=0.95, line=dict(width=0)),
-        customdata=np.arange(seq),
-        hovertemplate="#%{customdata}: <b>%{text}</b><extra></extra>",
+        customdata=np.stack([np.arange(seq), np.asarray(cids)], axis=1),
+        hovertemplate="#%{customdata[0]} · cluster %{customdata[1]}: "
+                      "<b>%{text}</b><extra></extra>",
         showlegend=False), row=row, col=col)
 
     # bucket edges by strength; record (query, key, bin) for the click handler
@@ -364,7 +482,16 @@ def render_graph3d(labels, attns, hiddens, args):
     except ImportError:
         raise SystemExit("the 3D token graph needs plotly — `pip install plotly`")
 
-    panels = build_panels(attns, args)          # (title, attn_2d) with layer in title
+    # 1) drop stopwords / punctuation / specials / sink, then slice attentions and
+    #    hidden states down to the surviving content tokens (same set across layers).
+    keep = keep_indices(labels, args.drop_stopwords)
+    kt = torch.tensor(keep, dtype=torch.long)
+    flabels = [labels[i] for i in keep]
+    fattns = tuple(a.index_select(1, kt).index_select(2, kt) for a in attns)
+    fhiddens = tuple(h.index_select(0, kt) for h in hiddens)
+    print(f"kept {len(keep)}/{len(labels)} content tokens after stopword removal")
+
+    panels = build_panels(fattns, args)         # (title, attn_2d) with layer in title
     n = len(panels)
     ncols = min(n, args.max_cols)
     nrows = (n + ncols - 1) // ncols
@@ -375,13 +502,20 @@ def render_graph3d(labels, attns, hiddens, args):
     fig = make_subplots(rows=nrows, cols=ncols, specs=specs,
                         subplot_titles=[t for t, _ in panels])
 
-    metas, total = [], 0
+    metas, total, ncl = [], 0, 0
     for idx, (title, mat) in enumerate(panels):
         L = resolve_layer(args.layers[0] if args.per_head else args.layers[idx],
-                          len(attns))
-        coords = project_3d(hiddens[L + 1], args.proj)     # layer-L output states
+                          len(fattns))
+        coords = project_3d(fhiddens[L + 1], args.proj)    # layer-L output states
+        # 2) cluster the surviving tokens into meaningful units
+        if args.cluster == "none":
+            cids = np.arange(len(flabels))
+        else:
+            cids = cluster_tokens(omit(mat, args), fhiddens[L + 1],
+                                  args.cluster, args.n_clusters)
+        ncl = max(ncl, len(set(int(c) for c in cids)))
         meta, ne = draw_graph3d_plotly(fig, idx // ncols + 1, idx % ncols + 1,
-                                       labels, coords, mat, args, smax)
+                                       flabels, coords, mat, cids, args, smax)
         metas.append(meta)
         total += ne
 
@@ -389,6 +523,7 @@ def render_graph3d(labels, attns, hiddens, args):
                       xaxis=dict(showticklabels=False),
                       yaxis=dict(showticklabels=False),
                       zaxis=dict(showticklabels=False), aspectmode="cube")
+    clu = "off" if args.cluster == "none" else f"{args.cluster} (~{ncl} clusters)"
     fig.update_layout(
         title=(args.title or f"3D token graph · {args.model} · {args.proj.upper()} proj")
               + "  —  click a node to isolate its links",
@@ -397,8 +532,8 @@ def render_graph3d(labels, attns, hiddens, args):
 
     click_js = _CLICK_JS.replace("__PANELS__", json.dumps(metas))
     fig.write_html(args.out, include_plotlyjs=True, full_html=True, post_script=click_js)
-    print(f"saved {args.out}  ({n} 3D scenes, {total} edges, {len(labels)} tokens, "
-          f"proj={args.proj}) — drag to rotate, click a node to isolate its links")
+    print(f"saved {args.out}  ({n} scenes, {total} edges, {len(flabels)} tokens, "
+          f"proj={args.proj}, clustering={clu}) — drag to rotate, click to isolate")
 
 
 # ── rendering ───────────────────────────────────────────────────────────────────
@@ -674,6 +809,17 @@ def main():
     p.add_argument("--proj", choices=["pca", "umap"], default="pca",
                    help="how to place tokens in 3D for --style graph "
                         "(pca: no deps; umap: better clusters, needs umap-learn)")
+    p.add_argument("--cluster", choices=["attention", "embedding", "none"],
+                   default="attention",
+                   help="group surviving tokens into meaningful units, colored per "
+                        "cluster: attention=community detection on the attention "
+                        "graph; embedding=k-means on hidden states; none=off")
+    p.add_argument("--n-clusters", type=int, default=0,
+                   help="k for --cluster embedding (0 = auto by token count)")
+    p.add_argument("--drop-stopwords", dest="drop_stopwords", action="store_true",
+                   default=True, help="drop stopwords before the graph (default on)")
+    p.add_argument("--keep-stopwords", dest="drop_stopwords", action="store_false",
+                   help="keep stopwords/function words in the graph")
     p.add_argument("--backend", choices=["auto", "plotly", "matplotlib"],
                    default="auto",
                    help="surface/arc only: auto = .html→plotly, else static image")
