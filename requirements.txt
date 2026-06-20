@@ -9,3 +9,4 @@ tqdm>=4.66.0
 matplotlib>=3.7.0   # Exp 3.1 decimation curves (optional; plotting is guarded)
 datasets>=2.18.0          # Proof 5: HotpotQA distractor (proofs/hotpot.py)
 sentence-transformers>=2.7.0   # Proof 5: BGE-large text-RAG baseline (proofs/retriever.py)
+plotly>=5.20.0   # interactive 3D attention map (proofs/attention_map.py --out *.html; optional, guarded)

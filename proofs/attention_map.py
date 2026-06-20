@@ -260,7 +260,83 @@ def draw_surface_panel(ax, labels, attn_2d, title, args, zmax):
 
 
 def render(labels, attns, args):
-    """Build the figure. --style arc → 2D arc panels; --style surface → 3D
+    """Dispatch on backend: an .html out (or --backend plotly) → an interactive,
+    rotatable/zoomable/hover 3D map; anything else → a static matplotlib image."""
+    use_plotly = (args.backend == "plotly" or
+                  (args.backend == "auto" and args.out.lower().endswith(".html")))
+    if use_plotly:
+        return render_plotly(labels, attns, args)
+    return render_matplotlib(labels, attns, args)
+
+
+def render_plotly(labels, attns, args):
+    """Interactive 3D word→word surface(s) written to a self-contained HTML. Drag to
+    rotate, scroll to zoom, and HOVER a peak to read the exact (query word, key word,
+    score) — the part a static image can't give you. One scene per layer/head."""
+    try:
+        import plotly.graph_objects as go
+        from plotly.subplots import make_subplots
+    except ImportError:
+        raise SystemExit("interactive HTML needs plotly — `pip install plotly`, or "
+                         "write a static image with --out …png")
+
+    panels = build_panels(attns, args)
+    n = len(panels)
+    ncols = min(n, args.max_cols)
+    nrows = (n + ncols - 1) // ncols
+    seq = len(labels)
+    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
+
+    vals = np.concatenate([omit(m, args).numpy().ravel() for _, m in panels])
+    pos = vals[vals > 0]
+    zmax = max(float(np.percentile(pos, args.zmax_pct)) if pos.size else 1.0, 1e-6)
+
+    # per-cell token strings for the hover box (query = row i, key = col j)
+    lab = np.array(labels, dtype=object)
+    qlab = np.tile(lab.reshape(seq, 1), (1, seq))     # [i,j] -> labels[i]
+    klab = np.tile(lab.reshape(1, seq), (seq, 1))     # [i,j] -> labels[j]
+    customdata = np.dstack([qlab, klab])
+    hover = ("query: <b>%{customdata[0]}</b><br>"
+             "key:   <b>%{customdata[1]}</b><br>"
+             "attn:  %{z:.3f}<extra></extra>")
+
+    specs = [[{"type": "surface"} for _ in range(ncols)] for _ in range(nrows)]
+    fig = make_subplots(rows=nrows, cols=ncols, specs=specs,
+                        subplot_titles=[t for t, _ in panels])
+    for idx, (title, mat) in enumerate(panels):
+        Z = omit(mat, args).numpy()
+        fig.add_trace(
+            go.Surface(z=Z, customdata=customdata, colorscale="Viridis",
+                       cmin=0.0, cmax=zmax, showscale=(idx == 0),
+                       colorbar=dict(title="attn", len=0.6),
+                       hovertemplate=hover),
+            row=idx // ncols + 1, col=idx % ncols + 1,
+        )
+
+    step = max(1, seq // args.max_ticks)              # thin axis ticks
+    ticks = list(range(0, seq, step))
+    ticktext = [labels[i] for i in ticks]
+    # all scenes share the same token set, so one update covers every panel
+    fig.update_scenes(
+        xaxis=dict(title="key (attended-to)", tickmode="array",
+                   tickvals=ticks, ticktext=ticktext),
+        yaxis=dict(title="query (attending)", tickmode="array",
+                   tickvals=ticks, ticktext=ticktext),
+        zaxis=dict(title="attn", range=[0.0, zmax]),
+        aspectmode="cube",
+    )
+    fig.update_layout(
+        title=args.title or f"Attention · {args.model} model · interactive 3D",
+        height=520 * nrows, width=620 * ncols, margin=dict(l=0, r=0, t=60, b=0),
+    )
+    # embed plotly.js so the file opens offline after you scp it off the cluster
+    fig.write_html(args.out, include_plotlyjs=True, full_html=True)
+    print(f"saved {args.out}  ({n} interactive panels, "
+          f"z-scale@{args.zmax_pct}%={zmax:.3f}, seq_len={seq}) — open in a browser")
+
+
+def render_matplotlib(labels, attns, args):
+    """Build a STATIC figure. --style arc → 2D arc panels; --style surface → 3D
     word→word terrain panels. One panel per requested layer (or per head)."""
     panels = build_panels(attns, args)
     n = len(panels)
@@ -343,6 +419,9 @@ def main():
                    help="plot every head of a single layer instead of layer panels")
     p.add_argument("--style", choices=["surface", "arc"], default="surface",
                    help="surface=3D word→word terrain (default); arc=2D arc diagram")
+    p.add_argument("--backend", choices=["auto", "plotly", "matplotlib"],
+                   default="auto",
+                   help="auto: .html out → interactive plotly, else static image")
     p.add_argument("--elev", type=float, default=35.0, help="3D view elevation")
     p.add_argument("--azim", type=float, default=-60.0, help="3D view azimuth")
     p.add_argument("--zmax-pct", type=float, default=99.0,
@@ -372,7 +451,8 @@ def main():
     p.add_argument("--panel-width", type=float, default=3.2)
     p.add_argument("--dpi", type=int, default=150)
     p.add_argument("--title", default=None)
-    p.add_argument("--out", default="proofs/data/attention_map.png")
+    p.add_argument("--out", default="proofs/data/attention_map.html",
+                   help="output path; .html → interactive 3D, .png → static image")
     args = p.parse_args()
 
     if args.text_file:
