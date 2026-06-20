@@ -36,16 +36,17 @@ The numbers that decide the project:
       a gap there means the prompt framing flatters latent (the docnaive bug), and the
       multi-hop numbers aren't trustworthy until fixed.
 
-Usage (--gpus pins to FREE GPUs, like p3_path/run_chain; default = all visible):
-    python proofs/p5_latent_vs_rag.py --arm hotpot --gpus 4,5,6,7 \
-        --max-candidates 400 --out proofs/data/p5.json
+Usage (pick physical GPUs with CUDA_VISIBLE_DEVICES, like proofs 0–3 / run_chain; eval
+is checkpointed to --out after every item and resumes from a partial --out):
+    CUDA_VISIBLE_DEVICES=4,5,6,7 python proofs/p5_latent_vs_rag.py --arm hotpot \
+        --max-candidates 400 --max-eval 60 --think-max-new-tokens 1024 --out proofs/data/p5.json
     # the synthetic control + the parity control:
-    ... python proofs/p5_latent_vs_rag.py --arm synth_multihop --gpus 4,5,6,7 --out proofs/data/p5_synth.json
-    ... python proofs/p5_latent_vs_rag.py --arm synth_parity   --gpus 4,5,6,7 --out proofs/data/p5_parity.json
+    CUDA_VISIBLE_DEVICES=4,5,6,7 python proofs/p5_latent_vs_rag.py --arm synth_multihop --out proofs/data/p5_synth.json
+    CUDA_VISIBLE_DEVICES=4,5,6,7 python proofs/p5_latent_vs_rag.py --arm synth_parity   --out proofs/data/p5_parity.json
     # wire-test the whole pipeline cheaply before committing GPU hours:
-    ... python proofs/p5_latent_vs_rag.py --arm hotpot --gpus 4,5,6,7 --max-candidates 30 --no-think
+    CUDA_VISIBLE_DEVICES=4,5,6,7 python proofs/p5_latent_vs_rag.py --arm hotpot --max-candidates 30 --no-think
     # re-score a saved run with the current scorers (no GPU):
-    ... python proofs/p5_latent_vs_rag.py --rescore proofs/data/p5.json
+    python proofs/p5_latent_vs_rag.py --rescore proofs/data/p5.json
 """
 
 import os
@@ -230,26 +231,6 @@ def _free_cuda():
                 torch.cuda.empty_cache()
 
 
-def _report_gpu_placement(model):
-    """Print how many param tensors landed on each GPU and the memory now held, so you can
-    SEE the 70B is spread across the GPUs you asked for — not packed into the first two
-    (the device_map='sequential' front-packing trap that OOMs on long prefill / injection).
-    Mirrors `p4_length._report_gpu_placement`."""
-    import torch
-    from collections import Counter
-    counts = Counter()
-    for _name, p in model.named_parameters():
-        if p.device.type == "cuda":
-            counts[p.device.index] += 1
-    print("  GPU placement (param tensors / memory):")
-    for i in sorted(counts):
-        alloc = torch.cuda.memory_allocated(i) / 1e9 if torch.cuda.is_available() else 0
-        print(f"    cuda:{i}  {counts[i]:>4} tensors  {alloc:5.1f} GB")
-    if len(counts) <= 2:
-        print(f"    !!! only {len(counts)} GPU(s) hold weights — pass "
-              "--device-map balanced_low_0 (front-packed weights OOM on long prefill).")
-
-
 # ════════════════════════════════════════════════════════════════════════════════
 # Stage: gate (C fails AND A succeeds)
 # ════════════════════════════════════════════════════════════════════════════════
@@ -297,23 +278,55 @@ def run_gate(model, tok, recs, args):
 # ════════════════════════════════════════════════════════════════════════════════
 # Stage: eval (the 2×2 grid + ceilings, on the gated set)
 # ════════════════════════════════════════════════════════════════════════════════
-def run_eval(model, tok, gated, args, backend):
+def run_eval(model, tok, gated, args, backend, resume_path=None):
     layer = args.layer
     m = args.think_max_new_tokens if args.think else args.max_new_tokens
-
-    # tune the baseline: pick the chunk size maximizing recall on a held-out slice
-    tune_pool = gated[:args.tune_n] if len(gated) > args.tune_n else gated
-    best_chunk, chunk_scores = tune_chunk_size(
-        tune_pool, backend, candidate_sizes=tuple(args.chunk_sizes), k=args.tune_k)
-    print(f"  chunk-size tune: best={best_chunk}  scores={chunk_scores}")
     ks = sorted(set(args.rag_ks))
     # rag conditions are STRING-labeled so the per-item, budget-matched k (a "generous k
     # that roughly matches the gold-fact token budget" — the spec's information-matched
     # point) sits in the sweep beside the fixed ks without making the columns ragged.
     rag_labels = [str(k) for k in ks] + ["budget"]
 
-    records, canary_mismatch, canary_checked, dropped = [], 0, False, 0
-    for i, rec in enumerate(gated):
+    # ── resume: each item is checkpointed to `resume_path`, so a killed run loses at most
+    # the in-flight item, not the whole eval (this run already cost a day; never again). ──
+    records, prev = [], {}
+    if resume_path and os.path.exists(resume_path):
+        try:
+            with open(resume_path) as f:
+                prev = json.load(f)
+            records = prev.get("records", []) or []
+        except Exception as e:
+            print(f"  [resume] could not read {resume_path}: {e}")
+    done_ids = {r["id"] for r in records}
+    if records:
+        print(f"  [resume] {len(records)} eval records loaded; their ids are skipped")
+
+    # tune the baseline once (reuse across resumes): chunk size maximizing recall on a slice
+    if prev.get("best_chunk"):
+        best_chunk, chunk_scores = prev["best_chunk"], prev.get("chunk_scores", {})
+        print(f"  chunk-size reuse: best={best_chunk}")
+    else:
+        tune_pool = gated[:args.tune_n] if len(gated) > args.tune_n else gated
+        best_chunk, chunk_scores = tune_chunk_size(
+            tune_pool, backend, candidate_sizes=tuple(args.chunk_sizes), k=args.tune_k)
+        print(f"  chunk-size tune: best={best_chunk}  scores={chunk_scores}")
+
+    canary_mismatch = prev.get("canary_mismatch", 0)
+    canary_checked = bool(records)       # a prior session already ran the canary
+    dropped = prev.get("dropped_no_needle", 0)
+
+    def snapshot():
+        return {"layer": layer, "best_chunk": best_chunk, "chunk_scores": chunk_scores,
+                "ks": ks, "rag_labels": rag_labels, "canary_mismatch": canary_mismatch,
+                "dropped_no_needle": dropped, "records": records}
+
+    cap = args.max_eval or len(gated)
+    todo = [g for g in gated if g["id"] not in done_ids][:max(0, cap - len(records))]
+    n_gens = (4 if args.with_docnaive else 3) + len(rag_labels)
+    print(f"  eval plan: {len(records)} done, {len(todo)} to run this session "
+          f"(cap {cap}, gated {len(gated)}); ~{n_gens} gens/item, think_max={m}")
+
+    for rec in todo:
         doc, q, gold = rec["doc_text"], rec["question"], rec["answer"]
         decoys = rec.get("decoy_values", [])
         needle_idx = needle_idx_of(tok, rec, args.max_doc_tokens)
@@ -353,16 +366,17 @@ def run_eval(model, tok, gated, args, backend):
                           "text": rag_text_of(got), "k": k}
 
         _set_think(args.think)
-        answers = {
-            "A": rec["a_ans"],     # reuse the gate's full-document answer (same think mode)
-            "latent_all_docnaive": inject_answer(model, tok, cache, n_doc, q, layer, m),
-            "latent_all_qfair": ans_qfair(model, tok, qcache, n_pre, q, layer, m),
-            "latent_sparse": inject_answer_subset(
-                model, tok, cache, n_doc, needle_positions(needle_idx, keep_sink=True),
-                q, layer, m),
-            "text_gold": full_prefill_answer(model, tok, gold_text_of(rec), q, m,
-                                             max_length=args.max_doc_tokens),
-        }
+        # docnaive is a diagnostic (q-fair is the robust capture per 4.1) — off by default
+        # so it doesn't cost a generation per item.
+        answers = {"A": rec["a_ans"]}     # reuse the gate's full-document answer
+        if args.with_docnaive:
+            answers["latent_all_docnaive"] = inject_answer(model, tok, cache, n_doc, q, layer, m)
+        answers["latent_all_qfair"] = ans_qfair(model, tok, qcache, n_pre, q, layer, m)
+        answers["latent_sparse"] = inject_answer_subset(
+            model, tok, cache, n_doc, needle_positions(needle_idx, keep_sink=True),
+            q, layer, m)
+        answers["text_gold"] = full_prefill_answer(model, tok, gold_text_of(rec), q, m,
+                                                   max_length=args.max_doc_tokens)
         for label, _k in sweep:
             answers[f"text_rag@{label}"] = full_prefill_answer(
                 model, tok, rag[label]["text"], q, m, max_length=args.max_doc_tokens)
@@ -375,16 +389,16 @@ def run_eval(model, tok, gated, args, backend):
             "answers": answers,
             "scores": {c: score_all(a, gold, decoys) for c, a in answers.items()},
         })
-        print(f"  eval [{i+1}/{len(gated)}] sparse="
-              f"{records[-1]['scores']['latent_sparse']['strict']} "
-              f"gold={records[-1]['scores']['text_gold']['strict']} "
-              f"({len(records)} done)", end="\r")
+        if resume_path:                  # checkpoint after every item
+            with open(resume_path, "w") as f:
+                json.dump(snapshot(), f, default=str)
+        print(f"  eval [{len(records)} done / {cap}] {rec['id']}: "
+              f"sparse={records[-1]['scores']['latent_sparse']['strict']} "
+              f"gold={records[-1]['scores']['text_gold']['strict']}", end="\r")
         del cache, qcache
         _free_cuda()
     print()
-    return {"layer": layer, "best_chunk": best_chunk, "chunk_scores": chunk_scores,
-            "ks": ks, "rag_labels": rag_labels, "canary_mismatch": canary_mismatch,
-            "dropped_no_needle": dropped, "records": records}
+    return snapshot()
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -660,23 +674,29 @@ def main():
                     help="suppress reasoning (smoke only; Proof 5 is think-ON)")
     ap.set_defaults(think=True)
     ap.add_argument("--max-new-tokens", type=int, default=256)
-    ap.add_argument("--think-max-new-tokens", type=int, default=2048)
+    ap.add_argument("--think-max-new-tokens", type=int, default=2048,
+                    help="reasoning budget per generation; the per-item cost driver. "
+                         "Lower (e.g. 1024) to roughly halve wall-clock — 2-hop answers "
+                         "rarely need 2048, and a truncated <think> already scores as "
+                         "no-answer so over-truncation is visible, not silent.")
     ap.add_argument("--max-doc-tokens", type=int, default=4096)
-    ap.add_argument("--rag-ks", type=int, nargs="+", default=[2, 4, 8])
+    ap.add_argument("--max-eval", type=int, default=None,
+                    help="cap gated items evaluated this run (resume-safe; default = all). "
+                         "Use e.g. 60 for a first verdict overnight, then rerun to extend.")
+    ap.add_argument("--with-docnaive", action="store_true",
+                    help="also run latent_all_docnaive (diagnostic; off by default — q-fair "
+                         "is the robust capture per 4.1 — so it doesn't cost a gen/item)")
+    # default to a single tuned k (+ the budget-matched k) so eval runs ~2 RAG gens/item,
+    # not 4. Pass --rag-ks 2 4 8 for the full sweep when compute allows.
+    ap.add_argument("--rag-ks", type=int, nargs="+", default=[4])
     ap.add_argument("--chunk-sizes", type=int, nargs="+", default=[64, 128, 256])
     ap.add_argument("--tune-n", type=int, default=20, help="held-out slice for chunk tuning")
     ap.add_argument("--tune-k", type=int, default=4, help="k used during chunk tuning")
     ap.add_argument("--rag-device", default="cpu", help="device for the BGE retriever")
     ap.add_argument("--rag-backend", default="bge", choices=["bge", "hash"])
-    ap.add_argument("--gpus", default=None,
-                    help="comma-separated PHYSICAL GPU ids to use, e.g. 4,5,6,7 (sets "
-                         "CUDA_VISIBLE_DEVICES; the model then shards over the contiguous "
-                         "logical 0..N-1). Pin to free GPUs to avoid busy ones. Default = "
-                         "all visible / whatever CUDA_VISIBLE_DEVICES already restricts.")
-    ap.add_argument("--device-map", default="balanced_low_0",
-                    help="layer placement; 'balanced_low_0' spreads weights across every "
-                         "GPU and keeps GPU0 light (needed to avoid the front-packing OOM).")
-    ap.add_argument("--max-mem-per-gpu", default="70GiB")
+    ap.add_argument("--gpus", default="0,1,2,3",
+                    help="logical GPU indices for DeepSeek shards (pick physical GPUs with "
+                         "CUDA_VISIBLE_DEVICES, exactly like proofs 0–3 / run_chain)")
     ap.add_argument("--gate-cache", default=None,
                     help="path to cache/reuse the gated set (default derived from --out)")
     ap.add_argument("--out", default="proofs/data/p5.json")
@@ -696,16 +716,6 @@ def main():
         print(f"\nRe-scored → {out}")
         return
 
-    # ── physical GPU selection (must happen before ANY cuda init, incl. _preflight's
-    # sentence-transformers import). --gpus sets CUDA_VISIBLE_DEVICES so the model always
-    # shards over the CONTIGUOUS logical set 0..N-1: accelerate's get_balanced_memory
-    # indexes max_memory by range(1, num_devices), so non-0-based keys (e.g. {4,5,6,7})
-    # throw `KeyError: 1`. Passing --gpus as physical ids and translating here is what lets
-    # `--gpus 4,5,6,7` mean "use GPUs 4–7" without that trap. An externally-set
-    # CUDA_VISIBLE_DEVICES is respected (then --gpus is redundant). ──
-    if args.gpus and "CUDA_VISIBLE_DEVICES" not in os.environ:
-        os.environ["CUDA_VISIBLE_DEVICES"] = args.gpus
-
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     gate_cache = args.gate_cache or args.out.replace(".json", f"_gated_{args.arm}.json")
     need_gate = not os.path.exists(gate_cache)
@@ -719,22 +729,16 @@ def main():
         recs = load_candidates(args.arm, args)
         print(f"[gate] resolved {len(recs)} {args.arm} candidates (pre-load)")
 
+    # Model placement copied verbatim from proofs 0–3 / run_chain: --gpus are logical GPU
+    # indices (pick physical GPUs with CUDA_VISIBLE_DEVICES), load_deepseek's default
+    # device_map="sequential" — right for HotpotQA's short docs, and it never trips the
+    # balanced_memory KeyError.
     from config import StitcherConfig
-    import torch
     cfg = StitcherConfig()
-    # Always shard over the contiguous logical set 0..N-1 of whatever is visible (physical
-    # selection already done above). device_map=balanced_low_0 spreads the weights across
-    # every GPU and keeps GPU0 light for the forward pass — the placement that avoids the
-    # front-packing OOM.
-    devices = tuple(range(torch.cuda.device_count()))
-    if not devices:
-        raise RuntimeError("no CUDA devices visible — set CUDA_VISIBLE_DEVICES or --gpus")
-    print(f"sharding DeepSeek-70B across {len(devices)} GPU(s): {devices} "
-          f"(CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES', '<all>')}, "
-          f"device_map={args.device_map}, max_mem_per_gpu={args.max_mem_per_gpu})")
-    tok, model = load_deepseek(cfg, devices=devices, device_map=args.device_map,
-                               max_memory_per_gpu=args.max_mem_per_gpu)
-    _report_gpu_placement(model)
+    devices = tuple(int(x) for x in args.gpus.split(","))
+    print(f"sharding DeepSeek-70B across GPUs {devices} "
+          "(select physical GPUs with CUDA_VISIBLE_DEVICES)")
+    tok, model = load_deepseek(cfg, devices=devices)
 
     # ── gate (resumable) ──
     if not need_gate:
@@ -753,10 +757,10 @@ def main():
         print("No gated items — nothing to evaluate. (All memorized or all A-unanswerable.)")
         return
 
-    # ── eval ──
+    # ── eval (checkpointed to --out after every item; resumes from a partial --out) ──
     backend = make_backend(args.rag_backend, args.rag_device)
     print(f"[eval] retriever backend={args.rag_backend} on {args.rag_device}")
-    result = run_eval(model, tok, gated, args, backend)
+    result = run_eval(model, tok, gated, args, backend, resume_path=args.out)
     result["arm"] = args.arm
     result["gate_summary"] = gate_summary
     agg = aggregate(result)
