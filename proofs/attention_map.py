@@ -291,26 +291,30 @@ def draw_graph3d_plotly(fig, row, col, labels, coords, attn_2d, args, smax):
     return meta, len(scores)
 
 
-# JS injected into the HTML: click a node → show only its incident edges + label
-# its neighbours, grey everything else; click it again (or double-click the canvas)
-# to reset. Works per-panel via the PANELS trace-index map.
+# JS injected into the HTML. NOTE: Plotly's scatter3d (gl3d/WebGL) traces do NOT
+# emit `plotly_click` — only hover events work in 3D. So we track the hovered node
+# via plotly_hover and fire the selection from a real DOM mouseup, distinguishing a
+# click from a rotate-drag by mouse travel. Click a node → show only its incident
+# edges + label its neighbours, grey the rest; click it again, click empty space, or
+# double-click → reset. Per-panel via the PANELS trace-index map.
 _CLICK_JS = """
 var __divs = document.querySelectorAll('div.plotly-graph-div');
 var gd = __divs[__divs.length - 1];
 var PANELS = __PANELS__;
+var lastHover = null, downXY = null;
+
+function findPanel(cn) {
+  for (var k = 0; k < PANELS.length; k++) if (PANELS[k].node === cn) return PANELS[k];
+  return null;
+}
 function resetPanel(p) {
   Plotly.restyle(gd, {'marker.color': [p.colors.slice()], 'text': [p.labels.slice()]}, [p.node]);
   for (var b = 0; b < p.bins.length; b++)
     Plotly.restyle(gd, {x: [p.origX[b]], y: [p.origY[b]], z: [p.origZ[b]]}, [p.bins[b]]);
   p.sel = null;
 }
-gd.on('plotly_click', function (ev) {
-  if (!ev.points || !ev.points.length) return;
-  var pt = ev.points[0], cn = pt.curveNumber, clicked = pt.pointNumber;
-  var p = null;
-  for (var k = 0; k < PANELS.length; k++) if (PANELS[k].node === cn) { p = PANELS[k]; break; }
-  if (!p) return;                              // clicked an edge, not a node
-  if (p.sel === clicked) { resetPanel(p); return; }   // toggle off
+function select(p, clicked) {
+  if (p.sel === clicked) { resetPanel(p); return; }     // toggle off
   p.sel = clicked;
   var nb = {}; nb[clicked] = 1;
   p.edges.forEach(function (e) {
@@ -318,7 +322,7 @@ gd.on('plotly_click', function (ev) {
     if (e[1] === clicked) nb[e[0]] = 1;
   });
   var colors = p.colors.map(function (c, i) {
-    return (i === clicked) ? 'rgba(220,30,30,1)' : (nb[i] ? c : 'rgba(200,200,200,0.08)');
+    return (i === clicked) ? 'rgba(220,30,30,1)' : (nb[i] ? c : 'rgba(200,200,200,0.06)');
   });
   var text = p.labels.map(function (t, i) { return nb[i] ? t : ''; });
   Plotly.restyle(gd, {'marker.color': [colors], 'text': [text]}, [p.node]);
@@ -331,6 +335,20 @@ gd.on('plotly_click', function (ev) {
     });
     Plotly.restyle(gd, {x: [xs], y: [ys], z: [zs]}, [p.bins[b]]);
   }
+}
+gd.on('plotly_hover', function (e) { if (e.points && e.points.length) lastHover = e.points[0]; });
+gd.on('plotly_unhover', function () { lastHover = null; });
+gd.addEventListener('mousedown', function (ev) { downXY = [ev.clientX, ev.clientY]; });
+gd.addEventListener('mouseup', function (ev) {
+  if (!downXY) return;
+  var moved = Math.abs(ev.clientX - downXY[0]) + Math.abs(ev.clientY - downXY[1]);
+  downXY = null;
+  if (moved > 6) return;                         // a drag/rotate, not a click
+  if (lastHover) {
+    var p = findPanel(lastHover.curveNumber);
+    if (p) { select(p, lastHover.pointNumber); return; }
+  }
+  PANELS.forEach(resetPanel);                     // clicked empty space → reset
 });
 gd.on('plotly_doubleclick', function () { PANELS.forEach(resetPanel); });
 """
