@@ -1,0 +1,105 @@
+Cross attention is a key component in transformers, where a sequence can attend to another sequence’s information, making it essential for tasks like translation or summarization. In this blog, I’ll dive into how cross attention works, building upon concepts like self-attention, multi-head attention, and masked multi-head attention, which I’ve covered in previous blogs. Along with layer normalization and positional encoding, cross attention plays a crucial role in capturing relationships between sequences, enabling transformers to handle complex dependencies in tasks like machine translation.
+
+Press enter or click to view image in full size
+
+image from Attention All You Need paper
+Before we dive into the details of Cross Attention, I want to extend my heartfelt gratitude to my mentor, Nitish Sir. His exceptional guidance and teachings on the CampusX YouTube channel have been instrumental in shaping my understanding of this complex topic. With his support, I’ve embarked on this journey of exploration and learning, and I’m excited to share my insights with you all. Thank you, Nitish Sir, for being an inspiration and mentor!
+
+Cross attention is a fundamental mechanism in transformers, especially for sequence-to-sequence tasks like translation or summarization. Let’s break it down with an example to understand it better.
+
+Imagine you’re using machine translation to convert an English sentence like “I like eating ice cream” into Hindi. This process typically involves an encoder-decoder setup. The encoder reads the input sentence and understands its context, while the decoder generates the corresponding output in Hindi, step by step.
+
+Press enter or click to view image in full size
+
+image by CampusX
+At each step, the decoder needs to generate the next word. For instance, after generating “मुझे” and “आइसक्रीम”, the decoder needs to figure out the next word, which in this case would be “खाना” (eating). But how does the decoder decide this? It depends on two key factors:
+
+What has been generated so far (“मुझे” and “आइसक्रीम”).
+The input sentence itself, meaning the information passed from the encoder.
+To handle the first factor, self-attention is used, which helps the decoder understand how previously generated words relate to each other. However, for the second factor — understanding the relationship between the input sentence and the output sentence — cross attention comes into play. Cross attention allows the decoder to attend to different parts of the input sentence, determining how words in the input sequence (e.g., “ice cream”) relate to words in the output sequence (e.g., “आइसक्रीम”).
+
+Press enter or click to view image in full size
+
+In this figure, the larger circles indicate a stronger relationship between the corresponding words in the input and output sequences.
+In simple terms, cross attention identifies connections between two sequences, aligning words from different languages to help the model generate precise translations.
+
+Self-Attention vs Cross-Attention: Understanding the Input :
+In this section, we will dive deeper into how cross attention works and how it establishes relationships between two sequences. Understanding the mechanism of cross attention becomes easier once we realize that it is conceptually similar to self-attention, something you might already be familiar with. The key difference lies in the input it takes and how it processes this input.
+
+To put it simply, while self-attention works on a single sequence by generating contextual embeddings for its tokens, cross attention handles two sequences at once. For example, in a machine translation task, if we are translating the sentence “We are friends” from English to Hindi, cross attention takes both the input sequence (“We are friends”) and the output sequence (“हम दोस्त हैं”) to establish the relationships between these sequences. It computes how strongly each word in the English sentence relates to each word in the Hindi sentence.
+
+Press enter or click to view image in full size
+
+In self-attention, we only need to pass one sequence as input, but for cross attention, we pass both sequences, the source and the target, making this the first point of difference between the two mechanisms.
+
+Self-Attention vs Cross-Attention: Understanding the Processing :
+Let’s now dive into the processing differences between self-attention and cross-attention. To understand how cross-attention works, it’s crucial to first have a solid grasp of how self-attention operates. Once you recall that, it becomes easier to spot the key differences between the two.
+
+In self-attention, given an input sequence like “We are friends,” the first step is to generate embeddings (or contextual embeddings if working with deeper layers) for each word in the sequence. These embeddings go through three linear transformations to produce the query, key, and value vectors for each word. For instance, for the word “We,” self-attention creates three vectors: a query vector, a key vector, and a value vector. This process is repeated for every word in the sequence, leading to three vectors per word.
+
+Press enter or click to view image in full size
+
+Once the vectors are generated, the query vectors of each word are dot-multiplied with the key vectors of every other word in the sequence. This operation gives us similarity scores or attention scores, which represent how much one word is related to another. For example, the word “We” would be compared to every other word in the sentence, such as “are” and “friends.” After this, we apply softmax to scale the attention scores, allowing us to focus more on relevant relationships.
+
+Press enter or click to view image in full size
+
+Press enter or click to view image in full size
+
+In this figure, the larger circles indicate a stronger relationship between the corresponding words in the input and output sequences.
+In cross-attention, the general structure remains similar, but the key distinction is that cross-attention deals with two sequences instead of one. For example, if we are translating “We are friends” into Hindi as “हम दोस्त हैं,” the model takes both sequences as input. Cross-attention generates query vectors from the output sequence (Hindi), while key and value vectors are derived from the input sequence (English).
+
+Press enter or click to view image in full size
+
+This is the major difference: the query vectors come from the output sequence, while the key and value vectors come from the input sequence. For instance, if the word in the output sequence is “हम,” the query vector is generated for that word. Simultaneously, key and value vectors are calculated for the words in the input sequence (“We are friends”).
+
+Get Sachin Soni’s stories in your inbox
+Join Medium for free to get updates from this writer.
+
+Enter your email
+Subscribe
+
+Remember me for faster sign in
+
+Just like self-attention, cross-attention calculates similarity scores between the query vectors from the output sequence and the key vectors from the input sequence. These scores are then used to weight the value vectors from the input sequence. In the end, this process helps the model determine how similar or related words from the output sequence (Hindi) are to words from the input sequence (English).
+
+Press enter or click to view image in full size
+
+Press enter or click to view image in full size
+
+In this figure, the larger circles indicate a stronger relationship between the corresponding words in the input and output sequences.
+This is why cross-attention is conceptually very similar to self-attention, with the primary difference being the generation of query, key, and value vectors from different sequences. This mechanism helps align words from different sequences, enabling better translation or other tasks involving multiple sequences.
+
+Self-Attention vs Cross-Attention: Understanding the Output :
+Let’s start by understanding the key difference between the outputs of self-attention and cross-attention.
+
+In the self-attention block, you pass an embedding for each token or word. For example, if the input words are “We,” “are,” and “friends,” we have embeddings for each: embedding of “We,” embedding of “are,” and embedding of “friends.” After performing certain calculations, we obtain contextual embeddings for each word. So, we can label these as the contextual embedding of “We,” contextual embedding of “are,” and contextual embedding of “friends.”
+
+To simplify understanding, we can represent the output of self-attention as a weighted sum of embeddings. For instance, if we calculate the contextual embedding of “We,” it is derived from the weighted sum of embeddings of “We,” “are,” and “friends,” where the weights represent the similarity between them. Similarly, the contextual embedding of “are” is influenced primarily by its own embedding, but also to some extent by the embeddings of “We” and “friends.”
+
+Press enter or click to view image in full size
+
+Demonstrating how the contextual embedding of a word is calculated using information from other words
+Thus, the output of self-attention for each word depends on the entire sequence.
+
+Now, let’s shift our focus to cross-attention. In cross-attention, we deal with two sequences. Just like in self-attention, we obtain contextual embeddings here as well, but the number of contextual embeddings corresponds to the number of words in the output sequence.
+
+Press enter or click to view image in full size
+
+Comparing the outputs of Self-Attention and Cross-Attention
+For example, if the output sequence has three words, like “हम,” “दोस्त,” and “हैं,” you will receive three contextual embeddings: one for each word. These contextual embeddings are also calculated based on the contribution of each input embedding to the output. For instance, the contextual embedding for “हम” may consist of contributions from the input embeddings of “We,” “are,” and “friends.”
+
+Press enter or click to view image in full size
+
+Demonstrating how the contextual embedding of a word is calculated using information from other words
+So, the process is similar, but in cross-attention, the key difference is that the calculation is divided across two sequences, and the number of output vectors is determined by the number of words in the output sequence.
+
+Practical Applications of Cross Attention :
+Cross-attention is particularly useful in scenarios where there are two distinct sequences involved. Some key applications include:
+
+Machine Translation: Translating text from one language to another involves comparing and aligning words between the source and target languages.
+Question Answering: Determining which parts of the context are relevant to answer a given question.
+Image Captioning: Generating descriptive text for images, where the image and text are treated as different modalities.
+Text-to-Image Generation: Creating images based on textual descriptions.
+Text-to-Speech: Generating speech from text, where the input is text and the output is speech.
+References :
+Research Paper : Attention is all you need
