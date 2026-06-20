@@ -10,10 +10,12 @@ attentions and hidden states, and three view styles render them:
             the surviving content tokens are clustered into meaningful units
             (attention-graph communities, or k-means on hidden states), and each
             token is projected to a point in 3D (PCA — or UMAP — of its layer hidden
-            state). Attention is drawn as LINES between points (width/opacity ∝
-            score); nodes are colored by cluster. Self-contained interactive HTML:
-            drag to rotate, hover a node for its token+cluster, CLICK a node to
-            isolate just its links. One 3D scene per requested layer.
+            state). Same-sentence tokens are pulled together and the full sentence
+            floats as a label at each sentence's centroid. Attention is drawn as
+            LINES between points (width/opacity ∝ score); nodes are colored by
+            cluster. Self-contained interactive HTML: drag to rotate, hover a node
+            for its token+cluster+sentence, CLICK a node to isolate just its links.
+            One 3D scene per requested layer.
   surface — the attention matrix as a 3D terrain (key × query × score).
   arc     — a flat bertviz-style arc diagram.
 
@@ -51,6 +53,7 @@ from __future__ import annotations   # `str | None` annotations on any 3.7+ inte
 
 import os
 import sys
+import re
 import json
 import argparse
 from pathlib import Path
@@ -177,6 +180,68 @@ def keep_indices(labels, drop_stopwords):
     keep = [i for i, lab in enumerate(labels)
             if i != 0 and not _is_dropped_token(lab, drop_stopwords)]
     return keep or list(range(len(labels)))          # never return empty
+
+
+_SENT_END = ".!?…"
+
+
+def sentence_ids(labels):
+    """Assign each token (full, unfiltered sequence) a sentence index, and return the
+    reconstructed sentence strings. A token ends a sentence when it terminates in
+    .!?… AND the next token starts a new word (leading space) or is end-of-text —
+    that lookahead avoids splitting decimals/abbreviations whose continuation tokens
+    carry no leading space ('8', '.', '849' stays one 'sentence')."""
+    n = len(labels)
+    sids, texts, buf, cur = [], [], [], 0
+    for i, lab in enumerate(labels):
+        sids.append(cur)
+        buf.append(lab)
+        t = lab.strip()
+        nxt = labels[i + 1] if i + 1 < n else ""
+        ends = bool(t) and t[-1] in _SENT_END
+        boundary = ends and (i == n - 1 or nxt[:1].isspace() or nxt.startswith("\\n"))
+        if boundary:
+            texts.append(_join_sentence(buf)); buf = []; cur += 1
+    if buf:
+        texts.append(_join_sentence(buf))
+    while len(texts) <= (max(sids) if sids else -1):
+        texts.append("")
+    return sids, texts
+
+
+def _join_sentence(buf):
+    s = "".join(buf)
+    s = re.sub(r"\\n", " ", s)
+    s = re.sub(r"\s+([.,!?;:…])", r"\1", s)          # no space before punctuation
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _wrap(text, max_chars):
+    """Truncate a sentence for the floating label and soft-wrap with <br>."""
+    text = text if len(text) <= max_chars else text[:max_chars - 1].rstrip() + "…"
+    words, lines, line = text.split(" "), [], ""
+    for w in words:
+        if len(line) + len(w) + 1 > 32 and line:
+            lines.append(line); line = w
+        else:
+            line = (line + " " + w).strip()
+    if line:
+        lines.append(line)
+    return "<br>".join(lines)
+
+
+def sentence_pull(coords, sids, alpha):
+    """Pull each token toward its sentence centroid so same-sentence tokens sit next
+    to each other (alpha in [0,1]; 0 = no grouping). Convex blend keeps coords in
+    the cube and preserves intra-sentence spread."""
+    if alpha <= 0:
+        return coords
+    out = coords.copy()
+    sids = np.asarray(sids)
+    for s in np.unique(sids):
+        m = sids == s
+        out[m] = (1.0 - alpha) * coords[m] + alpha * coords[m].mean(0, keepdims=True)
+    return out
 
 
 def cluster_tokens(attn_2d, H, mode, n_clusters, seed=0):
@@ -352,11 +417,13 @@ def _hsl_to_rgb(h, s, l):
     return f(0), f(8), f(4)
 
 
-def draw_graph3d_plotly(fig, row, col, labels, coords, attn_2d, cids, args, smax):
+def draw_graph3d_plotly(fig, row, col, labels, coords, attn_2d, cids, sids,
+                        sent_texts, args, smax):
     """Add one interactive 3D node-link scene and return its (metadata dict, n_edges).
-    Nodes are colored by cluster (cids). Always emits the node trace + NBINS edge
-    traces (some may start empty) so the click handler has a fixed set of traces to
-    repopulate per bin."""
+    Nodes are colored by cluster (cids); same-sentence tokens are pulled together and
+    the full sentence floats at each sentence centroid. Always emits the node trace +
+    NBINS edge traces (some may start empty) so the click handler has a fixed set of
+    traces to repopulate per bin."""
     import plotly.graph_objects as go
     seq = len(labels)
     qi, kj, scores = select_edges(attn_2d, args.threshold, args.top_k,
@@ -374,9 +441,9 @@ def draw_graph3d_plotly(fig, row, col, labels, coords, attn_2d, cids, args, smax
         mode="markers+text", text=list(labels), textposition="top center",
         textfont=dict(size=9), marker=dict(size=msize, color=colors,
                                            opacity=0.95, line=dict(width=0)),
-        customdata=np.stack([np.arange(seq), np.asarray(cids)], axis=1),
-        hovertemplate="#%{customdata[0]} · cluster %{customdata[1]}: "
-                      "<b>%{text}</b><extra></extra>",
+        customdata=np.stack([np.arange(seq), np.asarray(cids), np.asarray(sids)], axis=1),
+        hovertemplate="#%{customdata[0]} · cluster %{customdata[1]} · sentence "
+                      "%{customdata[2]}: <b>%{text}</b><extra></extra>",
         showlegend=False), row=row, col=col)
 
     # bucket edges by strength; record (query, key, bin) for the click handler
@@ -401,6 +468,21 @@ def draw_graph3d_plotly(fig, row, col, labels, coords, attn_2d, cids, args, smax
             x=xs, y=ys, z=zs, mode="lines",
             line=dict(width=1.0 + 6.0 * frac,
                       color=f"rgba(70,110,200,{0.08 + 0.72 * frac:.3f})"),
+            hoverinfo="skip", showlegend=False), row=row, col=col)
+
+    # floating full-sentence labels at each sentence centroid
+    if args.show_sentences:
+        sx, sy, sz, st = [], [], [], []
+        sa = np.asarray(sids)
+        for s in np.unique(sa):
+            m = sa == s
+            c = coords[m].mean(0)
+            sx.append(float(c[0])); sy.append(float(c[1]))
+            sz.append(float(c[2]) + 0.07)
+            st.append("<i>" + _wrap(sent_texts[int(s)], args.sentence_chars) + "</i>")
+        fig.add_trace(go.Scatter3d(
+            x=sx, y=sy, z=sz, mode="text", text=st,
+            textfont=dict(size=10, color="rgba(35,35,35,0.85)"),
             hoverinfo="skip", showlegend=False), row=row, col=col)
 
     meta = dict(node=node_idx, bins=bin_idx, edges=edges,
@@ -482,14 +564,20 @@ def render_graph3d(labels, attns, hiddens, args):
     except ImportError:
         raise SystemExit("the 3D token graph needs plotly — `pip install plotly`")
 
+    # sentence index per token is computed on the FULL sequence (so boundaries are
+    # right) then carried through the keep mask.
+    sids_full, sent_texts = sentence_ids(labels)
+
     # 1) drop stopwords / punctuation / specials / sink, then slice attentions and
     #    hidden states down to the surviving content tokens (same set across layers).
     keep = keep_indices(labels, args.drop_stopwords)
     kt = torch.tensor(keep, dtype=torch.long)
     flabels = [labels[i] for i in keep]
+    fsids = [sids_full[i] for i in keep]
     fattns = tuple(a.index_select(1, kt).index_select(2, kt) for a in attns)
     fhiddens = tuple(h.index_select(0, kt) for h in hiddens)
-    print(f"kept {len(keep)}/{len(labels)} content tokens after stopword removal")
+    print(f"kept {len(keep)}/{len(labels)} content tokens after stopword removal; "
+          f"{len(set(fsids))} sentences")
 
     panels = build_panels(fattns, args)         # (title, attn_2d) with layer in title
     n = len(panels)
@@ -507,7 +595,9 @@ def render_graph3d(labels, attns, hiddens, args):
         L = resolve_layer(args.layers[0] if args.per_head else args.layers[idx],
                           len(fattns))
         coords = project_3d(fhiddens[L + 1], args.proj)    # layer-L output states
-        # 2) cluster the surviving tokens into meaningful units
+        # 2) pull same-sentence tokens together so sentences read as spatial groups
+        coords = sentence_pull(coords, fsids, args.sentence_pull)
+        # 3) cluster the surviving tokens into meaningful units
         if args.cluster == "none":
             cids = np.arange(len(flabels))
         else:
@@ -515,7 +605,8 @@ def render_graph3d(labels, attns, hiddens, args):
                                   args.cluster, args.n_clusters)
         ncl = max(ncl, len(set(int(c) for c in cids)))
         meta, ne = draw_graph3d_plotly(fig, idx // ncols + 1, idx % ncols + 1,
-                                       flabels, coords, mat, cids, args, smax)
+                                       flabels, coords, mat, cids, fsids,
+                                       sent_texts, args, smax)
         metas.append(meta)
         total += ne
 
@@ -820,6 +911,15 @@ def main():
                    default=True, help="drop stopwords before the graph (default on)")
     p.add_argument("--keep-stopwords", dest="drop_stopwords", action="store_false",
                    help="keep stopwords/function words in the graph")
+    p.add_argument("--sentence-pull", type=float, default=0.45,
+                   help="0..1 cohesion pulling same-sentence tokens together "
+                        "(0 = off, default 0.45)")
+    p.add_argument("--show-sentences", dest="show_sentences", action="store_true",
+                   default=True, help="float the full sentence text on the map (on)")
+    p.add_argument("--no-sentences", dest="show_sentences", action="store_false",
+                   help="hide the floating sentence labels")
+    p.add_argument("--sentence-chars", type=int, default=80,
+                   help="max chars of each sentence shown in its floating label")
     p.add_argument("--backend", choices=["auto", "plotly", "matplotlib"],
                    default="auto",
                    help="surface/arc only: auto = .html→plotly, else static image")
