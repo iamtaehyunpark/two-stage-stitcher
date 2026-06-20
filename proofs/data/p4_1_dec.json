@@ -1,0 +1,2358 @@
+{
+  "length": 32000,
+  "layer": 12,
+  "depths": [
+    0.1,
+    0.5,
+    0.9
+  ],
+  "main_docs": [
+    "verdant_ledger",
+    "pellan_lighthouse",
+    "mossgrove_vineyard",
+    "tarn_aqueduct",
+    "halvern_mint",
+    "brae_funicular"
+  ],
+  "modes": [
+    "off",
+    "on"
+  ],
+  "dec_keep_rate": 0.5,
+  "no_dec": false,
+  "sanity_canary_mismatch": 0,
+  "gate_rows": [
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.1,
+      "question": "Who founded the Kessler Observatory?",
+      "gold": "Aldous Wren",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The Kessler Observatory was founded by Aldous Wren, a reclusive instrument-maker.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.1,
+      "question": "What is the name of the observatory's great lens?",
+      "gold": "Marrow lens",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The name of the observatory's great lens is the **Marrow lens**.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.1,
+      "question": "In what year did the observatory fix the orbit of the Verel comet?",
+      "gold": "1893",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The observatory fixed the orbit of the Verel comet in the year **1893**.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.1,
+      "question": "Who succeeded the founder as director of the observatory?",
+      "gold": "Petra Voss",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "Petra Voss succeeded the founder, Aldous Wren, as director of the observatory.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.1,
+      "question": "On what mountain does the Kessler Observatory stand?",
+      "gold": "Mount Haldane",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The Kessler Observatory stands on the windward shoulder of Mount Haldane.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.5,
+      "question": "Who founded the Kessler Observatory?",
+      "gold": "Aldous Wren",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The Kessler Observatory was founded by Aldous Wren.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.5,
+      "question": "What is the name of the observatory's great lens?",
+      "gold": "Marrow lens",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The name of the observatory's great lens is the **Marrow lens**.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.5,
+      "question": "In what year did the observatory fix the orbit of the Verel comet?",
+      "gold": "1893",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The observatory fixed the orbit of the Verel comet in the year **1893**.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.5,
+      "question": "Who succeeded the founder as director of the observatory?",
+      "gold": "Petra Voss",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "Petra Voss succeeded the founder, Aldous Wren, as director of the observatory.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.5,
+      "question": "On what mountain does the Kessler Observatory stand?",
+      "gold": "Mount Haldane",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The Kessler Observatory stands on the windward shoulder of Mount Haldane.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.9,
+      "question": "Who founded the Kessler Observatory?",
+      "gold": "Aldous Wren",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The Kessler Observatory was founded by Aldous Wren, a reclusive instrument-maker who purch",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.9,
+      "question": "What is the name of the observatory's great lens?",
+      "gold": "Marrow lens",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The name of the observatory's great lens is the **Marrow lens**.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.9,
+      "question": "In what year did the observatory fix the orbit of the Verel comet?",
+      "gold": "1893",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The observatory fixed the orbit of the Verel comet in the year **1893**.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.9,
+      "question": "Who succeeded the founder as director of the observatory?",
+      "gold": "Petra Voss",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "Petra Voss succeeded the founder, Aldous Wren, as director of the observatory.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.9,
+      "question": "On what mountain does the Kessler Observatory stand?",
+      "gold": "Mount Haldane",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The Kessler Observatory stands on the windward shoulder of Mount Haldane.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.1,
+      "question": "Who designed the bridge at Harlan Gorge?",
+      "gold": "Edda Cole",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The bridge at Harlan Gorge was designed by Edda Cole, a county surveyor.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.1,
+      "question": "What is the name of the locking rivet used in the bridge?",
+      "gold": "Cole joint",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The locking rivet used in the bridge is called the **Cole joint**.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.1,
+      "question": "In what year did construction of the iron bridge begin?",
+      "gold": "1861",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The document mentions that construction of the iron bridge began in 1861.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.1,
+      "question": "In what year did the bridge open to traffic?",
+      "gold": "1864",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The bridge opened to traffic in the autumn of 1864.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.1,
+      "question": "To which school were the designer's papers left?",
+      "gold": "Brennan",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The designer's papers were left to the engineering school at Brennan.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.5,
+      "question": "Who designed the bridge at Harlan Gorge?",
+      "gold": "Edda Cole",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The bridge at Harlan Gorge was designed by Edda Cole, a county surveyor.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.5,
+      "question": "What is the name of the locking rivet used in the bridge?",
+      "gold": "Cole joint",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The locking rivet used in the bridge is called the **Cole joint**.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.5,
+      "question": "In what year did construction of the iron bridge begin?",
+      "gold": "1861",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The document mentions that construction of the iron bridge began in 1861.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.5,
+      "question": "In what year did the bridge open to traffic?",
+      "gold": "1864",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The bridge opened to traffic in the autumn of 1864.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.5,
+      "question": "To which school were the designer's papers left?",
+      "gold": "Brennan",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The designer's papers were left to the engineering school at Brennan.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.9,
+      "question": "Who designed the bridge at Harlan Gorge?",
+      "gold": "Edda Cole",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The bridge at Harlan Gorge was designed by Edda Cole, the county surveyor.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.9,
+      "question": "What is the name of the locking rivet used in the bridge?",
+      "gold": "Cole joint",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The locking rivet used in the bridge is called the **Cole joint**.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.9,
+      "question": "In what year did construction of the iron bridge begin?",
+      "gold": "1861",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The document mentions that construction of the iron bridge began in **1861**.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.9,
+      "question": "In what year did the bridge open to traffic?",
+      "gold": "1864",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The bridge opened to traffic in the autumn of 1864.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.9,
+      "question": "To which school were the designer's papers left?",
+      "gold": "Brennan",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The designer's papers were left to the engineering school at Brennan.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.1,
+      "question": "Who founded the Saltwell Press?",
+      "gold": "Tobias Renn",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The Saltwell Press was founded by Tobias Renn, a former ship's clerk, in 1799.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.1,
+      "question": "Who was the author of the Tidal Atlas?",
+      "gold": "Iseult Marsh",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The author of the Tidal Atlas was Iseult Marsh, a natural philosopher who brought the manu",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.1,
+      "question": "In what year was the Tidal Atlas published?",
+      "gold": "1822",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The Tidal Atlas was published in 1822.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.1,
+      "question": "What was the press's flexible binding method called?",
+      "gold": "Garrow binding",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The press's flexible binding method was called the Garrow binding.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.1,
+      "question": "To which museum was the old press given?",
+      "gold": "Garrow",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The old press was given to the civic museum at Garrow.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.5,
+      "question": "Who founded the Saltwell Press?",
+      "gold": "Tobias Renn",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The Saltwell Press was founded by Tobias Renn in 1799.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.5,
+      "question": "Who was the author of the Tidal Atlas?",
+      "gold": "Iseult Marsh",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The author of the Tidal Atlas was Iseult Marsh, a natural philosopher who brought the manu",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.5,
+      "question": "In what year was the Tidal Atlas published?",
+      "gold": "1822",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The Tidal Atlas was published in 1822.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.5,
+      "question": "What was the press's flexible binding method called?",
+      "gold": "Garrow binding",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The press's flexible binding method was called the Garrow binding.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.5,
+      "question": "To which museum was the old press given?",
+      "gold": "Garrow",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The old press was given to the civic museum at Garrow.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.9,
+      "question": "Who founded the Saltwell Press?",
+      "gold": "Tobias Renn",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The Saltwell Press was founded by Tobias Renn in 1799.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.9,
+      "question": "Who was the author of the Tidal Atlas?",
+      "gold": "Iseult Marsh",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The author of the Tidal Atlas was Iseult Marsh, a natural philosopher who brought the manu",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.9,
+      "question": "In what year was the Tidal Atlas published?",
+      "gold": "1822",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The Tidal Atlas was published in 1822.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.9,
+      "question": "What was the press's flexible binding method called?",
+      "gold": "Garrow binding",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The press's flexible binding method was called the Garrow binding.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.9,
+      "question": "To which museum was the old press given?",
+      "gold": "Garrow",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The old press was given to the civic museum at Garrow.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.1,
+      "question": "Who designed the Number Nine locomotive?",
+      "gold": "Gareth Pyne",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The Number Nine locomotive was designed by Gareth Pyne, the chief engineer at the Vantroy ",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.1,
+      "question": "What was the low-slung tank arrangement called?",
+      "gold": "Pyne truck",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The low-slung tank arrangement was called the Pyne truck.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.1,
+      "question": "In what year was the locomotive built?",
+      "gold": "1888",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The locomotive, known as Number Nine, was built in 1888.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.1,
+      "question": "In what year did the Skel mining line close?",
+      "gold": "1911",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The Skel mining line closed in 1911.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.1,
+      "question": "At which museum line is the locomotive now kept?",
+      "gold": "Tern",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The locomotive is now kept at a small museum line in the valley at Tern.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.5,
+      "question": "Who designed the Number Nine locomotive?",
+      "gold": "Gareth Pyne",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The Number Nine locomotive was designed by Gareth Pyne, the chief engineer at the Vantroy ",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.5,
+      "question": "What was the low-slung tank arrangement called?",
+      "gold": "Pyne truck",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The low-slung tank arrangement was called the **Pyne truck**.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.5,
+      "question": "In what year was the locomotive built?",
+      "gold": "1888",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": false,
+      "a_ans": "The locomotive was built in 1876.",
+      "gated": false
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.5,
+      "question": "In what year did the Skel mining line close?",
+      "gold": "1911",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The Skel mining line closed in 1911.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.5,
+      "question": "At which museum line is the locomotive now kept?",
+      "gold": "Tern",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The locomotive is now kept at the museum line in the valley at Tern.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.9,
+      "question": "Who designed the Number Nine locomotive?",
+      "gold": "Gareth Pyne",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The Number Nine locomotive was designed by Gareth Pyne, the chief engineer at the Vantroy ",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.9,
+      "question": "What was the low-slung tank arrangement called?",
+      "gold": "Pyne truck",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The low-slung tank arrangement was called the **Pyne truck**.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.9,
+      "question": "In what year was the locomotive built?",
+      "gold": "1888",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The locomotive was built in 1888.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.9,
+      "question": "In what year did the Skel mining line close?",
+      "gold": "1911",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The Skel mining line closed in 1911.",
+      "gated": true
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.9,
+      "question": "At which museum line is the locomotive now kept?",
+      "gold": "Tern",
+      "c_ok": false,
+      "cf_ok": false,
+      "a_ok": true,
+      "a_ans": "The locomotive is now kept at the museum line in Tern.",
+      "gated": true
+    }
+  ],
+  "eyeball": [],
+  "records": [
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.1,
+      "question": "Who founded the Kessler Observatory?",
+      "gold": "Aldous Wren",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document does not provide information about who founded the Kessler Observatory.",
+        "dec_latent@off": "The Kessler Observatory was founded by Aldous Wren, a reclusive lens-maker who built the observatory on Mount Haldane in 1871."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.1,
+      "question": "What is the name of the observatory's great lens?",
+      "gold": "Marrow lens",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The name of the observatory's great lens is not explicitly mentioned in the provided document.",
+        "dec_latent@off": "The name of the observatory's great lens is the Marrow lens."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.1,
+      "question": "In what year did the observatory fix the orbit of the Verel comet?",
+      "gold": "1893",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document does not provide the specific year when the observatory fixed the orbit of the Verel comet.",
+        "dec_latent@off": "The observatory fixed the orbit of the Verel comet in the year 1893."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.1,
+      "question": "Who succeeded the founder as director of the observatory?",
+      "gold": "Petra Voss",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document does not provide information about who succeeded the founder as director of the observatory.",
+        "dec_latent@off": "Petra Voss succeeded the founder as director of the observatory."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.1,
+      "question": "On what mountain does the Kessler Observatory stand?",
+      "gold": "Mount Haldane",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The Kessler Observatory stands on Mountrow.",
+        "dec_latent@off": "The Kessler Observatory stands on Mount Haldane."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.5,
+      "question": "Who founded the Kessler Observatory?",
+      "gold": "Aldous Wren",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document does not provide information about who founded the Kessler Observatory.",
+        "dec_latent@off": "The document does not mention the Kessler Observatory or its founder."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.5,
+      "question": "What is the name of the observatory's great lens?",
+      "gold": "Marrow lens",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The name of the observatory's great lens is the **Mar lens**.",
+        "dec_latent@off": "The name of the observatory's great lens is the **Marlow lens**."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.5,
+      "question": "In what year did the observatory fix the orbit of the Verel comet?",
+      "gold": "1893",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The observatory fixed the orbit of the Verel comet in the year **189**.",
+        "dec_latent@off": "The observatory fixed the orbit of the Verel comet in the year 1893."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.5,
+      "question": "Who succeeded the founder as director of the observatory?",
+      "gold": "Petra Voss",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "Petraoss succeeded the founder as director of the observatory.",
+        "dec_latent@off": "Petra Voss succeeded the founder as director of the observatory."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.5,
+      "question": "On what mountain does the Kessler Observatory stand?",
+      "gold": "Mount Haldane",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The Kessler Observatory stands on Mountald.",
+        "dec_latent@off": "The Kessler Observatory stands on Mount Hald."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.9,
+      "question": "Who founded the Kessler Observatory?",
+      "gold": "Aldous Wren",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The founder of the Kessler Observatory is Ald W. Kessler.",
+        "dec_latent@off": "The Kessler Observatory was founded by Aldous Wren."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.9,
+      "question": "What is the name of the observatory's great lens?",
+      "gold": "Marrow lens",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The name of the observatory's great lens is not explicitly mentioned in the provided document.",
+        "dec_latent@off": "The name of the observatory's great lens is the **Marrow lens**."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.9,
+      "question": "In what year did the observatory fix the orbit of the Verel comet?",
+      "gold": "1893",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document does not provide the specific year when the observatory fixed the orbit of the Verel comet.",
+        "dec_latent@off": "The observatory fixed the orbit of the Verel comet in the year 1871."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.9,
+      "question": "Who succeeded the founder as director of the observatory?",
+      "gold": "Petra Voss",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document does not provide information about who succeeded the founder as director of the observatory.",
+        "dec_latent@off": "The founder of the observatory was Aldous Wren. After his withdrawal, the directorship passed to Petra Voss."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": false,
+          "strict": false
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "kessler_observatory",
+      "depth": 0.9,
+      "question": "On what mountain does the Kessler Observatory stand?",
+      "gold": "Mount Haldane",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The Kessler Observatory stands on Mount Row.",
+        "dec_latent@off": "The Kessler Observatory stands on Mount Hoxane."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.1,
+      "question": "Who designed the bridge at Harlan Gorge?",
+      "gold": "Edda Cole",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document mentions that the bridge at Harlan Gorge was designed by **Dorothy Whit**.",
+        "dec_latent@off": "The bridge at Harlan Gorge was designed by Edda Goring."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.1,
+      "question": "What is the name of the locking rivet used in the bridge?",
+      "gold": "Cole joint",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document does not mention the name of the locking rivet used in the bridge.",
+        "dec_latent@off": "The locking rivet used in the bridge is called the **Cole joint**."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.1,
+      "question": "In what year did construction of the iron bridge begin?",
+      "gold": "1861",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document mentions that construction of the iron bridge began in 185.",
+        "dec_latent@off": "The construction of the iron bridge began in 1864."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.1,
+      "question": "In what year did the bridge open to traffic?",
+      "gold": "1864",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The bridge opened to traffic in 186.",
+        "dec_latent@off": "The bridge opened to traffic in the autumn of 1864."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.1,
+      "question": "To which school were the designer's papers left?",
+      "gold": "Brennan",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The designer's papers were left at Mar school.",
+        "dec_latent@off": "The designer's papers were left to the engineering school at Brennan."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.5,
+      "question": "Who designed the bridge at Harlan Gorge?",
+      "gold": "Edda Cole",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document mentions that the bridge at Harlan Gorge was designed by a woman named **Dorothy Whit**.",
+        "dec_latent@off": "The bridge at Harlan Gorge was designed by Dorcas Whitlock, a county surveyor."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.5,
+      "question": "What is the name of the locking rivet used in the bridge?",
+      "gold": "Cole joint",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document does not provide the name of the locking rivet used in the bridge.",
+        "dec_latent@off": "The locking rivet used in the bridge is called the **Whitlock joint**."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.5,
+      "question": "In what year did construction of the iron bridge begin?",
+      "gold": "1861",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document mentions that construction of the iron bridge began in 186.",
+        "dec_latent@off": "According to the document, construction of the iron bridge began in 1861."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.5,
+      "question": "In what year did the bridge open to traffic?",
+      "gold": "1864",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The bridge opened to traffic in the year 186.",
+        "dec_latent@off": "The bridge opened to traffic in the year 1861."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.5,
+      "question": "To which school were the designer's papers left?",
+      "gold": "Brennan",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The designer's papers were left at the school named \"Mar\" (possibly short for Mary or another name).",
+        "dec_latent@off": "The designer's papers were left to the engineering school at Brennan."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.9,
+      "question": "Who designed the bridge at Harlan Gorge?",
+      "gold": "Edda Cole",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document mentions that the bridge at Harlan Gorge was designed by E. Cole, who was a woman. She created the plans for the bridge after the original timber bridge was destroyed.",
+        "dec_latent@off": "The bridge at Harlan Gorge was designed by E. Cole, as mentioned in the document."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.9,
+      "question": "What is the name of the locking rivet used in the bridge?",
+      "gold": "Cole joint",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document does not mention the name of the locking rivet used in the bridge.",
+        "dec_latent@off": "The locking rivet used in the bridge is called the Cole rivet."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.9,
+      "question": "In what year did construction of the iron bridge begin?",
+      "gold": "1861",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document mentions that construction of the iron bridge began in 186.",
+        "dec_latent@off": "The construction of the iron bridge began in 1863."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.9,
+      "question": "In what year did the bridge open to traffic?",
+      "gold": "1864",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The bridge opened to traffic in 186.",
+        "dec_latent@off": "According to the document, the bridge opened to traffic in the autumn of 1864."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "harlan_bridge",
+      "depth": 0.9,
+      "question": "To which school were the designer's papers left?",
+      "gold": "Brennan",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document does not provide information about the school to which the designer's papers were left.",
+        "dec_latent@off": "The designer's papers were left to the engineering school at Harrender."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.1,
+      "question": "Who founded the Saltwell Press?",
+      "gold": "Tobias Renn",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document does not provide information about who founded the Saltwell Press.",
+        "dec_latent@off": "The Saltwell Press was founded by Tobias Renn in 1799."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.1,
+      "question": "Who was the author of the Tidal Atlas?",
+      "gold": "Iseult Marsh",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document does not provide the name of the author of the Tidal Atlas.",
+        "dec_latent@off": "The author of the Tidal Atlas was Iseult."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.1,
+      "question": "In what year was the Tidal Atlas published?",
+      "gold": "1822",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document does not provide the publication year of the Tidal Atlas.",
+        "dec_latent@off": "The Tidal Atlas was published in the year 1822."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.1,
+      "question": "What was the press's flexible binding method called?",
+      "gold": "Garrow binding",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The press's flexible binding method was called **G binding**.",
+        "dec_latent@off": "The press's flexible binding method was called the Garrow binding."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.1,
+      "question": "To which museum was the old press given?",
+      "gold": "Garrow",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The old press was given to the Pellire museum.",
+        "dec_latent@off": "The old press was given to the civic museum at Garrow."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.5,
+      "question": "Who founded the Saltwell Press?",
+      "gold": "Tobias Renn",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document mentions that the Saltwell Press was founded by Edmund Oandler.",
+        "dec_latent@off": "The Saltwell Press was founded by Tobias Renn in 1799."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.5,
+      "question": "Who was the author of the Tidal Atlas?",
+      "gold": "Iseult Marsh",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document does not provide information about the author of the Tidal Atlas.",
+        "dec_latent@off": "The author of the Tidal Atlas was Iseult."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.5,
+      "question": "In what year was the Tidal Atlas published?",
+      "gold": "1822",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document does not provide the specific year the Tidal Atlas was published.",
+        "dec_latent@off": "The Tidal Atlas was published in 1822."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.5,
+      "question": "What was the press's flexible binding method called?",
+      "gold": "Garrow binding",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The press's flexible binding method was called \"G binding.\"",
+        "dec_latent@off": "The press's flexible binding method was called the Garrow binding."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.5,
+      "question": "To which museum was the old press given?",
+      "gold": "Garrow",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document does not mention the museum to which the old press was given.",
+        "dec_latent@off": "The old press was given to the civic museum at Garrow."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.9,
+      "question": "Who founded the Saltwell Press?",
+      "gold": "Tobias Renn",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document mentions that the Saltwell Press was founded by Edmund Ollard.",
+        "dec_latent@off": "The Saltwell Press was founded by Tobias Renn in 1799."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.9,
+      "question": "Who was the author of the Tidal Atlas?",
+      "gold": "Iseult Marsh",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The author of the Tidal Atlas was Edmundoke.",
+        "dec_latent@off": "The author of the Tidal Atlas was Iseult."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.9,
+      "question": "In what year was the Tidal Atlas published?",
+      "gold": "1822",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The Tidal Atlas was published in 180.",
+        "dec_latent@off": "The Tidal Atlas was published in 1809."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.9,
+      "question": "What was the press's flexible binding method called?",
+      "gold": "Garrow binding",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The press's flexible binding method was called \"G binding.\"",
+        "dec_latent@off": "The press's flexible binding method was called the Garrow binding."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "saltwell_press",
+      "depth": 0.9,
+      "question": "To which museum was the old press given?",
+      "gold": "Garrow",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The old press was given to the Pellire Museum.",
+        "dec_latent@off": "The old press was given to the civic museum at Pellire."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.1,
+      "question": "Who designed the Number Nine locomotive?",
+      "gold": "Gareth Pyne",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document does not provide information about who designed the Number Nine locomotive.",
+        "dec_latent@off": "The Number Nine locomotive was designed by Gareth Pyne, the chief engineer at the Vant ironworks."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.1,
+      "question": "What was the low-slung tank arrangement called?",
+      "gold": "Pyne truck",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The low-slung tank arrangement was called the \"lowlung design.\"",
+        "dec_latent@off": "The low-slung tank arrangement was called the Pyne truck."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.1,
+      "question": "In what year was the locomotive built?",
+      "gold": "1888",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The locomotive was built in the year 187.",
+        "dec_latent@off": "The locomotive was built in 1888."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.1,
+      "question": "In what year did the Skel mining line close?",
+      "gold": "1911",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The Skel mining line closed in 1928.",
+        "dec_latent@off": "The Skel mining line closed in 1911."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.1,
+      "question": "At which museum line is the locomotive now kept?",
+      "gold": "Tern",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The locomotive is now kept at the museum in the valley T.",
+        "dec_latent@off": "The locomotive is now kept at a museum in Tern."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.5,
+      "question": "Who designed the Number Nine locomotive?",
+      "gold": "Gareth Pyne",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The document does not provide information about who designed the Number Nine locomotive.",
+        "dec_latent@off": "The Number Nine locomotive was designed by Gareth Pyne, the chief mechanic of the Vant railway works."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.5,
+      "question": "What was the low-slung tank arrangement called?",
+      "gold": "Pyne truck",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The low-slung tank arrangement was called the \"Py truck.\"",
+        "dec_latent@off": "The low-slung tank arrangement was called the Pyne truck."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.5,
+      "question": "In what year did the Skel mining line close?",
+      "gold": "1911",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The Skel mining line closed in the year 1951.",
+        "dec_latent@off": "The Skel mining line closed in 1911."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.5,
+      "question": "At which museum line is the locomotive now kept?",
+      "gold": "Tern",
+      "alts": [],
+      "kept_count": 16003,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The locomotive is now kept at the museum in the valley T.",
+        "dec_latent@off": "The locomotive is now kept at a museum line in Tern."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.9,
+      "question": "Who designed the Number Nine locomotive?",
+      "gold": "Gareth Pyne",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The Number Nine locomotive was designed by Garethne, the tacurnman who was the chief works manager.",
+        "dec_latent@off": "The Number Nine locomotive was designed by Gareth Pyne, the chief engineer at the Vant ironworks."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.9,
+      "question": "What was the low-slung tank arrangement called?",
+      "gold": "Pyne truck",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The low-slung tank arrangement was called the \"Py truck.\"",
+        "dec_latent@off": "The low-slung tank arrangement was called the \"Pyne truck.\""
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.9,
+      "question": "In what year was the locomotive built?",
+      "gold": "1888",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The locomotive was built in the year 1888.",
+        "dec_latent@off": "The locomotive was built in 1886."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        },
+        "dec_latent@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.9,
+      "question": "In what year did the Skel mining line close?",
+      "gold": "1911",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The Skel mining line closed in the year 188.",
+        "dec_latent@off": "The Skel mining line closed in 1911."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": true,
+          "firstline": true,
+          "strict": true
+        }
+      }
+    },
+    {
+      "arm": "dec",
+      "doc": "vantroy_engine",
+      "depth": 0.9,
+      "question": "At which museum line is the locomotive now kept?",
+      "gold": "Tern",
+      "alts": [],
+      "kept_count": 16004,
+      "keep_rate": 0.5,
+      "answers": {
+        "dec_text@off": "The locomotive is now kept at a museum in the valley T.",
+        "dec_latent@off": "The locomotive is now kept at a museum line in T T Cor."
+      },
+      "scores": {
+        "dec_text@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        },
+        "dec_latent@off": {
+          "lenient": false,
+          "firstline": false,
+          "strict": false
+        }
+      }
+    }
+  ],
+  "aggregate": {
+    "n_main": 0,
+    "n_dec": 59,
+    "distinct_main": 0,
+    "distinct_dec": 20,
+    "table": {
+      "A": {
+        "off": {
+          "lenient": null,
+          "firstline": null,
+          "strict": null
+        },
+        "on": {
+          "lenient": null,
+          "firstline": null,
+          "strict": null
+        }
+      },
+      "inject_docnaive": {
+        "off": {
+          "lenient": null,
+          "firstline": null,
+          "strict": null
+        },
+        "on": {
+          "lenient": null,
+          "firstline": null,
+          "strict": null
+        }
+      },
+      "inject_qfair": {
+        "off": {
+          "lenient": null,
+          "firstline": null,
+          "strict": null
+        },
+        "on": {
+          "lenient": null,
+          "firstline": null,
+          "strict": null
+        }
+      },
+      "needles_only": {
+        "off": {
+          "lenient": null,
+          "firstline": null,
+          "strict": null
+        }
+      },
+      "dec_text": {
+        "off": {
+          "lenient": 0.017,
+          "firstline": 0.017,
+          "strict": 0.017
+        }
+      },
+      "dec_latent": {
+        "off": {
+          "lenient": 0.644,
+          "firstline": 0.627,
+          "strict": 0.627
+        }
+      }
+    },
+    "headline": {
+      "qfair_strict_vs_A_strict": null,
+      "total_slack_lenient_minus_strict_docnaive": null,
+      "dec_latent_minus_dec_text_strict": 0.61
+    }
+  },
+  "verdict": {
+    "discrimination": "UNDERPOWERED",
+    "mechanism": "LATENT_BEATS_TEXT",
+    "recommend": "HOLD"
+  }
+}
