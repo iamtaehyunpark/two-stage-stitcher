@@ -172,13 +172,54 @@ def score_f1(answer, gold, alts=()):
     return round(best, 3)
 
 
-SCORERS = ["lenient", "firstline", "strict", "em"]
+# ── committed-answer scoring (the think-ON fix) ──────────────────────────────────
+# think-ON R1 often reasons aloud IN the answer and self-corrects: "I do not know. Wait,
+# no, the document says … So the answer should be X." first_clause grabs "I do not know"
+# and strict's negation guard fails a correct answer — an artifact that hits whichever
+# condition makes the model least certain (here, latent_sparse). The COMMITTED answer is
+# the model's final assertion, not its first clause: the text after the last answer-marker,
+# else the last sentence. Scoring this (uniformly, for every condition — clean answers are
+# unaffected because their last clause IS their answer) measures what the model concluded.
+_ANSWER_MARKERS = ["the answer should be", "the answer would be", "the answer is",
+                   "the correct answer is", "so the answer", "therefore the answer",
+                   "final answer", "answer:"]
+
+
+def committed_clause(answer: str) -> str:
+    text = (answer or "").strip()
+    if not text:
+        return ""
+    low = text.lower()
+    pos = max((low.rfind(m) for m in _ANSWER_MARKERS), default=-1)
+    if pos >= 0:
+        seg = text[pos:].strip()
+        parts = re.split(r"(?<=[.!?])\s", seg)
+        return parts[0] if parts else seg
+    sents = [s for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+    return sents[-1] if sents else text
+
+
+def score_committed(answer, gold, decoys=(), alts=()):
+    """Strict scoring (gold present, no decoy, no negation) applied to the COMMITTED
+    clause rather than the first clause — the fair think-ON metric."""
+    c = normalize(committed_clause(answer))
+    if not any(_wb(c, g) for g in _golds(gold, alts)):
+        return False
+    if any(_wb(c, d) for d in decoys):
+        return False
+    if any(neg in c for neg in _NEGATIONS):
+        return False
+    return True
+
+
+SCORERS = ["lenient", "firstline", "strict", "committed", "em"]
 
 
 def score_all(answer, gold, decoys=(), alts=()):
     return {"lenient": score_lenient(answer, gold, alts),
             "firstline": score_firstline(answer, gold, alts),
             "strict": score_strict(answer, gold, decoys, alts),
+            "committed": score_committed(answer, gold, decoys, alts),
             "em": score_em(answer, gold, alts),
             "f1": score_f1(answer, gold, alts)}
 
@@ -408,7 +449,8 @@ CONDS = ["A", "latent_all_docnaive", "latent_all_qfair", "latent_sparse", "text_
 
 
 def _rate(records, cond, scorer):
-    vals = [r["scores"][cond][scorer] for r in records if cond in r["scores"]]
+    vals = [r["scores"][cond][scorer] for r in records
+            if scorer in r.get("scores", {}).get(cond, {})]
     return round(sum(vals) / len(vals), 3) if vals else None
 
 
@@ -430,15 +472,23 @@ def _retrieved_subset(records, label):
     return [r for r in records if r["recall_by_k"].get(label, {}).get("full")]
 
 
-def failure_modes(records, best_k):
-    """Bucket each method's failures (the carried risk from 4.1)."""
+# Primary scorer for the headline / verdict. `committed` is the think-ON-fair metric (the
+# model's final assertion, not its first clause); `strict` is kept in the table for
+# reference so the reasoning-aloud artifact is visible, not hidden.
+HEADLINE_SCORER = "committed"
+
+
+def failure_modes(records, best_k, scorer=HEADLINE_SCORER):
+    """Bucket each method's failures (the carried risk from 4.1), judged on the COMMITTED
+    clause so a reasoning-aloud answer that reaches the right conclusion isn't miscounted
+    as a 'blank'."""
     latent, textr = {"blank": 0, "distractor_grab": 0, "hallucinate": 0, "n_fail": 0}, \
                     {"retrieval_miss": 0, "reasoning_fail": 0, "n_fail": 0}
     for r in records:
-        # latent_sparse failure taxonomy
-        if not r["scores"]["latent_sparse"]["strict"]:
+        # latent_sparse failure taxonomy (committed clause)
+        if not r["scores"]["latent_sparse"][scorer]:
             latent["n_fail"] += 1
-            ans = normalize(first_clause(r["answers"]["latent_sparse"]))
+            ans = normalize(committed_clause(r["answers"]["latent_sparse"]))
             if not ans or any(neg in ans for neg in _NEGATIONS):
                 latent["blank"] += 1
             elif any(_wb(ans, d) for d in r.get("decoy_values", [])):
@@ -446,7 +496,7 @@ def failure_modes(records, best_k):
             else:
                 latent["hallucinate"] += 1
         # text_rag@best failure taxonomy
-        if best_k is not None and not r["scores"][f"text_rag@{best_k}"]["strict"]:
+        if best_k is not None and not r["scores"][f"text_rag@{best_k}"][scorer]:
             textr["n_fail"] += 1
             if not r["recall_by_k"].get(str(best_k), {}).get("full"):
                 textr["retrieval_miss"] += 1
@@ -464,24 +514,29 @@ def aggregate(result):
         table[f"text_rag@{lab}"] = {s: _rate(records, f"text_rag@{lab}", s)
                                     for s in SCORERS + ["f1"]}
 
-    sp = _rate(records, "latent_sparse", "strict")
-    tg = _rate(records, "text_gold", "strict")
-    la = _rate(records, "latent_all_qfair", "strict")
-    a = _rate(records, "A", "strict")
-    rb = _rate(records, f"text_rag@{best_k}", "strict") if best_k is not None else None
-
     retr_sub = _retrieved_subset(records, best_k) if best_k is not None else []
-    sp_sub = _rate(retr_sub, "latent_sparse", "strict")
-    rb_sub = _rate(retr_sub, f"text_rag@{best_k}", "strict") if best_k is not None else None
 
-    headline = {
-        "repr__sparse_minus_textgold": _diff(sp, tg),                  # (1)
-        "deploy_raw__sparse_minus_ragbest": _diff(sp, rb),             # (2) raw
-        "deploy_retrieved__sparse_minus_ragbest": _diff(sp_sub, rb_sub),  # (2) fair subset
-        "handoff__latentall_minus_A": _diff(la, a),                    # (3)
-        "best_rag_k": best_k, "rag_strict_by_k": rag_rates,
-        "n_retrieved_subset": len(retr_sub),
-    }
+    def _headline(scorer):
+        sp = _rate(records, "latent_sparse", scorer)
+        tg = _rate(records, "text_gold", scorer)
+        la = _rate(records, "latent_all_qfair", scorer)
+        a = _rate(records, "A", scorer)
+        rb = _rate(records, f"text_rag@{best_k}", scorer) if best_k is not None else None
+        sp_sub = _rate(retr_sub, "latent_sparse", scorer)
+        rb_sub = _rate(retr_sub, f"text_rag@{best_k}", scorer) if best_k is not None else None
+        return {
+            "repr__sparse_minus_textgold": _diff(sp, tg),                     # (1)
+            "deploy_raw__sparse_minus_ragbest": _diff(sp, rb),                # (2) raw
+            "deploy_retrieved__sparse_minus_ragbest": _diff(sp_sub, rb_sub),  # (2) fair subset
+            "handoff__latentall_minus_A": _diff(la, a),                       # (3)
+        }
+
+    headline = _headline(HEADLINE_SCORER)
+    headline["scorer"] = HEADLINE_SCORER
+    headline["strict_reference"] = _headline("strict")
+    headline["best_rag_k"] = best_k
+    headline["rag_strict_by_k"] = rag_rates
+    headline["n_retrieved_subset"] = len(retr_sub)
     return {
         "n": len(records),
         "distinct": len({r["id"] for r in records}),
@@ -541,7 +596,8 @@ def _fmt(v):
 
 def report(result, agg, gate_summary, arm):
     print("\n" + "=" * 80)
-    print(f"PROOF 5 — latent vs text-RAG  [arm={arm}]  (L{result['layer']}, think-on, strict)")
+    print(f"PROOF 5 — latent vs text-RAG  [arm={arm}]  (L{result['layer']}, think-on, "
+          f"headline={HEADLINE_SCORER})")
     if gate_summary:
         print(f"  gate: {gate_summary['gated']} gated / {gate_summary['candidates']} "
               f"candidates  (closed-book discard {gate_summary['discard_rate']}, "
@@ -564,15 +620,20 @@ def report(result, agg, gate_summary, arm):
         print(row)
 
     h = agg["headline"]
-    print("\n  headline numbers (strict):")
-    print(f"    (1) latent_sparse − text_gold              : {_fmt(h['repr__sparse_minus_textgold'])}"
+    hs = h.get("strict_reference", {})
+    print(f"\n  headline numbers ({h.get('scorer', 'committed')}; strict in parens):")
+    print(f"    (1) latent_sparse − text_gold              : "
+          f"{_fmt(h['repr__sparse_minus_textgold'])} ({_fmt(hs.get('repr__sparse_minus_textgold'))})"
           "   ← representation vs text, equal oracle budget")
     print(f"    (2) latent_sparse − text_rag@{h['best_rag_k']} (raw)      : "
-          f"{_fmt(h['deploy_raw__sparse_minus_ragbest'])}   ← deployment comparison")
+          f"{_fmt(h['deploy_raw__sparse_minus_ragbest'])} ({_fmt(hs.get('deploy_raw__sparse_minus_ragbest'))})"
+          "   ← deployment comparison")
     print(f"    (2) … conditioned on retrieval success     : "
-          f"{_fmt(h['deploy_retrieved__sparse_minus_ragbest'])}   "
+          f"{_fmt(h['deploy_retrieved__sparse_minus_ragbest'])} "
+          f"({_fmt(hs.get('deploy_retrieved__sparse_minus_ragbest'))})   "
           f"(fair reasoning-vs-reasoning, n={h['n_retrieved_subset']})")
-    print(f"    (3) latent_all − A                         : {_fmt(h['handoff__latentall_minus_A'])}"
+    print(f"    (3) latent_all − A                         : "
+          f"{_fmt(h['handoff__latentall_minus_A'])} ({_fmt(hs.get('handoff__latentall_minus_A'))})"
           "   ← whole-document handoff cost (≈0 hoped)")
     print(f"    best RAG k = {h['best_rag_k']}  strict-by-k = {h['rag_strict_by_k']}")
 
