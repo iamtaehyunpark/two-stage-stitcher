@@ -64,7 +64,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import proofs.common as _common
 from proofs.common import (
     load_deepseek, no_context_answer, full_prefill_answer, inject_answer,
-    inject_answer_subset, final_answer, _with_think_control, normalize,
+    inject_answer_subset, final_answer, _with_think_control, normalize, generate_plain,
 )
 from core.split_forward import capture_doc_cache, split_forward_generate
 from proofs.needles import token_positions_for_char_span, needle_positions
@@ -172,44 +172,73 @@ def score_f1(answer, gold, alts=()):
     return round(best, 3)
 
 
-# ── committed-answer scoring (the think-ON fix) ──────────────────────────────────
-# think-ON R1 often reasons aloud IN the answer and self-corrects: "I do not know. Wait,
-# no, the document says … So the answer should be X." first_clause grabs "I do not know"
-# and strict's negation guard fails a correct answer — an artifact that hits whichever
-# condition makes the model least certain (here, latent_sparse). The COMMITTED answer is
-# the model's final assertion, not its first clause: the text after the last answer-marker,
-# else the last sentence. Scoring this (uniformly, for every condition — clean answers are
-# unaffected because their last clause IS their answer) measures what the model concluded.
-_ANSWER_MARKERS = ["the answer should be", "the answer would be", "the answer is",
-                   "the correct answer is", "so the answer", "therefore the answer",
-                   "final answer", "answer:"]
+# ── final-stance scoring (the think-ON fix) ──────────────────────────────────────
+# think-ON R1 reasons aloud IN the answer, self-corrects, and oscillates: "I do not know.
+# Wait, no, the document says … So the answer should be X. Wait, no …". first_clause grabs
+# "I do not know" and fails a correct answer; a fixed last-clause / answer-marker heuristic
+# is just as brittle the other way. So instead of guessing a position, we read the model's
+# FINAL STANCE: walk the sentences from the END and take the first that AFFIRMS a candidate
+# (gold or a near-miss decoy) — affirm = contains it as a word in a sentence that is not
+# itself negated/hedged. This is position-independent and marker-free; it captures what the
+# model CONCLUDED. A truncated/oscillating answer that never settles → no stance → wrong,
+# which is the honest verdict (the fix for those is more think budget, not a cleverer regex).
+_TENTATIVE = ["maybe", "perhaps", "might be", "possibly", "not sure", "i guess",
+              "could be", "i think it"]
 
 
-def committed_clause(answer: str) -> str:
-    text = (answer or "").strip()
-    if not text:
-        return ""
-    low = text.lower()
-    pos = max((low.rfind(m) for m in _ANSWER_MARKERS), default=-1)
-    if pos >= 0:
-        seg = text[pos:].strip()
-        parts = re.split(r"(?<=[.!?])\s", seg)
-        return parts[0] if parts else seg
-    sents = [s for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
-    return sents[-1] if sents else text
+def _sentences(text):
+    return [s for s in re.split(r"(?<=[.!?])\s+|\n+", (text or "").strip()) if s.strip()]
+
+
+def _yesno_stance(answer, gold):
+    """yes/no answers naturally contain 'not' ('they are not the same, so the answer is
+    no'), so the generic negation-skip would wrongly drop a correct 'no'. Instead read the
+    last explicit yes/no determination — an 'answer is/should be yes|no' assertion, or a
+    standalone 'Yes.'/'No.' — and compare to gold."""
+    g = normalize(gold)
+    for s in reversed(_sentences(answer)):
+        ns = normalize(s)
+        m = re.search(r"answer (?:is|should be|would be|here is|:)\s+(yes|no)\b", ns)
+        if not m and ns in ("yes", "no"):
+            m = re.match(r"(yes|no)$", ns)
+        if m:
+            return ("gold" if m.group(1) == g else "decoy"), s
+    return None, ""
+
+
+def final_stance(answer, gold, decoys=(), alts=()):
+    """Return ('gold'|'decoy'|None, deciding_sentence) — the model's last affirmed stance."""
+    if normalize(gold) in ("yes", "no"):
+        return _yesno_stance(answer, gold)
+    golds = [normalize(g) for g in _golds(gold, alts)]
+    decs = [normalize(d) for d in decoys]
+    for s in reversed(_sentences(answer)):
+        ns = normalize(s)
+        # a sentence that is negated, hedged, tentative, or a question is not a commitment
+        if (any(neg in ns for neg in _NEGATIONS) or any(t in ns for t in _TENTATIVE)
+                or s.strip().endswith("?")):
+            continue
+        has_gold = any(_wb(ns, g) for g in golds)
+        has_dec = any(_wb(ns, d) for d in decs)
+        if has_gold and not has_dec:
+            return "gold", s
+        if has_dec and not has_gold:
+            return "decoy", s              # final stance is a decoy → wrong
+    return None, ""
 
 
 def score_committed(answer, gold, decoys=(), alts=()):
-    """Strict scoring (gold present, no decoy, no negation) applied to the COMMITTED
-    clause rather than the first clause — the fair think-ON metric."""
-    c = normalize(committed_clause(answer))
-    if not any(_wb(c, g) for g in _golds(gold, alts)):
-        return False
-    if any(_wb(c, d) for d in decoys):
-        return False
-    if any(neg in c for neg in _NEGATIONS):
-        return False
-    return True
+    """True iff the model's FINAL STANCE is the gold answer (not a decoy, not unsettled)."""
+    return final_stance(answer, gold, decoys, alts)[0] == "gold"
+
+
+def committed_clause(answer, gold="", decoys=(), alts=()):
+    """The deciding sentence (for --show display); the last sentence if nothing decided."""
+    _, sent = final_stance(answer, gold, decoys, alts)
+    if sent:
+        return sent
+    sents = _sentences(answer)
+    return sents[-1] if sents else ""
 
 
 SCORERS = ["lenient", "firstline", "strict", "committed", "em"]
@@ -226,6 +255,40 @@ def score_all(answer, gold, decoys=(), alts=()):
 
 def _set_think(on: bool):
     _common.SUPPRESS_THINK = (not on)
+
+
+# ── LLM-judge (the authoritative, non-heuristic scorer) ──────────────────────────
+# The deterministic scorers above are transparent and validated, but any string rule has
+# blind spots on free-form reasoning. The field-standard cross-check is to let the model
+# itself judge whether a response's FINAL answer matches the reference — robust to
+# phrasing, self-correction, oscillation and yes/no. Run on SAVED answers (no re-generation
+# of the expensive main eval), so it is cheap to apply to a finished run.
+JUDGE_PROMPT = (
+    "You are grading a model's answer to a question. The response often shows its reasoning "
+    "and may correct itself or say \"I do not know\" before committing — judge ONLY whether "
+    "its FINAL answer is correct.\n\n"
+    "Question: {q}\nReference (correct) answer: {gold}\n\n"
+    "Model response:\n{ans}\n\n"
+    "Does the model's final answer match the reference (same entity / number / yes-no), "
+    "ignoring wording? Reply with exactly one word: CORRECT or INCORRECT."
+)
+
+
+def judge_answer(model, tok, q, gold, ans, max_new_tokens=8):
+    """One short think-off verdict. Returns True/False (defaults False on an unparseable
+    reply, so the judge never silently inflates)."""
+    prev = _common.SUPPRESS_THINK
+    _common.SUPPRESS_THINK = True
+    try:
+        out = generate_plain(model, tok,
+                             JUDGE_PROMPT.format(q=q, gold=gold, ans=(ans or "")[:2000]),
+                             max_new_tokens)
+    finally:
+        _common.SUPPRESS_THINK = prev
+    u = out.strip().upper()
+    if "INCORRECT" in u:
+        return False
+    return "CORRECT" in u
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -485,16 +548,18 @@ def failure_modes(records, best_k, scorer=HEADLINE_SCORER):
     latent, textr = {"blank": 0, "distractor_grab": 0, "hallucinate": 0, "n_fail": 0}, \
                     {"retrieval_miss": 0, "reasoning_fail": 0, "n_fail": 0}
     for r in records:
-        # latent_sparse failure taxonomy (committed clause)
+        # latent_sparse failure taxonomy via final stance
         if not r["scores"]["latent_sparse"][scorer]:
             latent["n_fail"] += 1
-            ans = normalize(committed_clause(r["answers"]["latent_sparse"]))
-            if not ans or any(neg in ans for neg in _NEGATIONS):
-                latent["blank"] += 1
-            elif any(_wb(ans, d) for d in r.get("decoy_values", [])):
-                latent["distractor_grab"] += 1
+            ans, gold = r["answers"]["latent_sparse"], r["gold"]
+            decoys, alts = r.get("decoy_values", []), r.get("alts", [])
+            stance, _ = final_stance(ans, gold, decoys, alts)
+            if stance == "decoy":
+                latent["distractor_grab"] += 1            # committed to a near-miss
+            elif score_lenient(ans, gold, alts):
+                latent["blank"] += 1                      # had the gold but never settled (oscillation/truncation)
             else:
-                latent["hallucinate"] += 1
+                latent["hallucinate"] += 1                # gold never appears
         # text_rag@best failure taxonomy
         if best_k is not None and not r["scores"][f"text_rag@{best_k}"][scorer]:
             textr["n_fail"] += 1
@@ -505,14 +570,28 @@ def failure_modes(records, best_k, scorer=HEADLINE_SCORER):
     return {"latent_sparse": latent, "text_rag_best": textr}
 
 
+def _present_scorers(records):
+    """Base scorers plus 'judge' when an LLM-judge pass has added it — so the table and
+    the headline pick it up automatically without hard-coding the column set."""
+    extra = []
+    for r in records:
+        for sd in r.get("scores", {}).values():
+            if "judge" in sd:
+                extra = ["judge"]
+            break
+        if extra:
+            break
+    return SCORERS + extra
+
+
 def aggregate(result):
     records = result["records"]
     labels = result.get("rag_labels") or [str(k) for k in result.get("ks", [])]
-    best_k, rag_rates = _best_rag_k(records, labels)
-    table = {c: {s: _rate(records, c, s) for s in SCORERS + ["f1"]} for c in CONDS}
+    best_k, rag_rates = _best_rag_k(records, labels, HEADLINE_SCORER)
+    scols = _present_scorers(records) + ["f1"]
+    table = {c: {s: _rate(records, c, s) for s in scols} for c in CONDS}
     for lab in labels:
-        table[f"text_rag@{lab}"] = {s: _rate(records, f"text_rag@{lab}", s)
-                                    for s in SCORERS + ["f1"]}
+        table[f"text_rag@{lab}"] = {s: _rate(records, f"text_rag@{lab}", s) for s in scols}
 
     retr_sub = _retrieved_subset(records, best_k) if best_k is not None else []
 
@@ -541,7 +620,7 @@ def aggregate(result):
         "n": len(records),
         "distinct": len({r["id"] for r in records}),
         "table": table, "headline": headline,
-        "failure_modes": failure_modes(records, best_k),
+        "failure_modes": failure_modes(records, best_k, HEADLINE_SCORER),
     }
 
 
@@ -608,7 +687,7 @@ def report(result, agg, gate_summary, arm):
           f"dropped(no-needle)={result['dropped_no_needle']}")
 
     labels = result.get("rag_labels") or [str(k) for k in result.get("ks", [])]
-    cols = SCORERS + ["f1"]
+    cols = _present_scorers(result["records"]) + ["f1"]
     head = "  " + f"{'condition':<22}" + "".join(f"{c:>10}" for c in cols)
     print("\n" + head)
     print("  " + "-" * (len(head) - 2))
@@ -686,28 +765,29 @@ def show_disagreements(result, n, cond="latent_sparse"):
     recs = result.get("records", [])
     print("\n" + "=" * 80)
     print(f"INSPECT [{cond}] — gold present (lenient) but strict-fail, of {len(recs)} items")
-    n_hedge = n_empty = n_clean = 0
+    n_settled = n_unsettled = n_clean = 0
     shown = []
     for r in recs:
         sc = r["scores"].get(cond, {})
         ans = r["answers"].get(cond, "")
-        clause = first_clause(ans)
         if sc.get("lenient") and not sc.get("strict"):
-            if not clause.strip():
-                n_empty += 1                 # truncated <think> → empty (raise think budget)
+            stance, sent = final_stance(ans, r["gold"], r.get("decoy_values", []),
+                                        r.get("alts", []))
+            if stance == "gold":
+                n_settled += 1               # final stance IS gold (first_clause/strict mis-scored)
             else:
-                n_hedge += 1                 # hedged/negated first clause (scoring penalty)
+                n_unsettled += 1             # gold present but never committed (oscillation/truncation)
             if len(shown) < n:
-                shown.append((r, ans, clause))
+                shown.append((r, ans, sent, stance))
         elif sc.get("strict"):
             n_clean += 1
-    print(f"  clean strict-pass: {n_clean} | gold-present-but-strict-fail: "
-          f"{n_hedge + n_empty}  (hedged {n_hedge}, empty/truncated {n_empty})")
-    for r, ans, clause in shown:
-        print(f"\n  [{r['id']}] gold={r['gold']!r}")
-        print(f"    {cond} first-clause : {clause[:160]!r}")
-        print(f"    {cond} full(≤300)   : {ans[:300]!r}")
-        print(f"    text_gold first     : {first_clause(r['answers'].get('text_gold',''))[:120]!r}")
+    print(f"  first-clause strict-pass: {n_clean} | gold-present-but-strict-fail: "
+          f"{n_settled + n_unsettled}  (final-stance=gold {n_settled}, "
+          f"unsettled/oscillating {n_unsettled})")
+    for r, ans, sent, stance in shown:
+        print(f"\n  [{r['id']}] gold={r['gold']!r}  final-stance={stance}")
+        print(f"    {cond} deciding   : {sent[:160]!r}")
+        print(f"    {cond} full(≤300) : {ans[:300]!r}")
     if not shown:
         print("  (none — lenient and strict agree for this condition)")
 
@@ -767,6 +847,10 @@ def main():
                     help="with --rescore: print up to N latent_sparse answers where the gold "
                          "is present (lenient) but strict fails — eyeball hedge vs truncation "
                          "vs real failure")
+    ap.add_argument("--judge", default=None, metavar="PATH",
+                    help="LLM-judge a SAVED run: load the model, judge each saved answer's "
+                         "FINAL answer vs the reference (no main re-generation), add a 'judge' "
+                         "scorer and make it the headline. The authoritative cross-check.")
     ap.add_argument("--arm", default="hotpot",
                     choices=["hotpot", "synth_multihop", "synth_parity"])
     ap.add_argument("--max-candidates", type=int, default=400,
@@ -822,6 +906,41 @@ def main():
         with open(out, "w") as f:
             json.dump(result, f, indent=2, default=str)
         print(f"\nRe-scored → {out}")
+        return
+
+    # ── --judge: load the model, judge SAVED answers, add a 'judge' scorer, re-report ──
+    if args.judge:
+        global HEADLINE_SCORER
+        with open(args.judge) as f:
+            result = rescore(json.load(f))          # ensure deterministic scorers present
+        from config import StitcherConfig
+        cfg = StitcherConfig()
+        devices = tuple(int(x) for x in args.gpus.split(","))
+        print(f"sharding DeepSeek-70B across GPUs {devices} for judging "
+              "(select physical GPUs with CUDA_VISIBLE_DEVICES)")
+        tok, model = load_deepseek(cfg, devices=devices)
+        labels = result.get("rag_labels") or [str(k) for k in result.get("ks", [])]
+        conds = CONDS + [f"text_rag@{lab}" for lab in labels]
+        recs = result["records"]
+        for i, rec in enumerate(recs):
+            for cond in conds:
+                ans = rec["answers"].get(cond)
+                if ans is None:
+                    continue
+                rec["scores"].setdefault(cond, {})["judge"] = judge_answer(
+                    model, tok, rec["question"], rec["gold"], ans)
+            print(f"  judged [{i+1}/{len(recs)}]", end="\r")
+        print()
+        HEADLINE_SCORER = "judge"
+        agg = aggregate(result)
+        v = report(result, agg, result.get("gate_summary"), result.get("arm", "hotpot"))
+        result["aggregate"] = agg
+        result["verdict"] = v
+        if args.show:
+            show_disagreements(result, args.show)
+        with open(args.judge, "w") as f:
+            json.dump(result, f, indent=2, default=str)
+        print(f"\nJudged → {args.judge}")
         return
 
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
