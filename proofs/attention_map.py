@@ -446,6 +446,52 @@ def _robust_cube(coords):
     return c / span
 
 
+def project_graph(H, sids, labels, sent_weight=1.0, knn=8, sim_thresh=0.3):
+    """Projection that MINIMIZES the distance between tokens that mean the same and/or
+    share a sentence — Laplacian Eigenmaps on a graph whose edge weights encode
+    "should be near":
+      • semantic — cosine kNN of the layer hidden states (same-meaning tokens attract);
+      • same surface token — a strong fixed boost;
+      • same sentence — `sent_weight` added to every within-sentence pair.
+    The spectral embedding y minimizes Σ wᵢⱼ‖yᵢ−yⱼ‖² (subject to a scale constraint),
+    so heavily-weighted (same-meaning / same-sentence) pairs are pulled together. This
+    replaces variance-preserving PCA, which has no notion of which tokens belong close.
+    """
+    Hn = H.numpy().astype("float64")
+    n = Hn.shape[0]
+    if n < 5:
+        return project_3d(H, "pca")
+
+    Xn = Hn / (np.linalg.norm(Hn, axis=1, keepdims=True) + 1e-9)
+    S = Xn @ Xn.T
+    np.fill_diagonal(S, -1.0)
+
+    # semantic kNN affinity (symmetrized by max; negative/low sims dropped)
+    W = np.zeros((n, n))
+    k = min(knn, n - 1)
+    for i in range(n):
+        for j in np.argpartition(-S[i], k)[:k]:
+            w = max(0.0, S[i, j] - sim_thresh)
+            W[i, j] = W[j, i] = max(W[i, j], w)
+
+    nrm = [re.sub(r"[^a-z0-9]", "", l.strip().lower()) for l in labels]
+    sa = np.asarray(sids)
+    same_tok = np.equal.outer(nrm, nrm) & np.array([[bool(x)] for x in nrm])
+    same_sent = np.equal.outer(sa, sa)
+    W = np.maximum(W, same_tok.astype(float))            # same token → strong pull
+    W = W + sent_weight * same_sent                       # same sentence → pull
+    np.fill_diagonal(W, 0.0)
+    W += 1e-6                                              # keep the graph connected
+    np.fill_diagonal(W, 0.0)
+
+    # normalized-Laplacian eigenmaps: smallest non-trivial eigenvectors
+    dinv = 1.0 / np.sqrt(W.sum(1) + 1e-12)
+    Lsym = np.eye(n) - (dinv[:, None] * W * dinv[None, :])
+    _vals, vecs = np.linalg.eigh(Lsym)                    # ascending
+    Y = dinv[:, None] * vecs[:, 1:4]                      # drop trivial vec 0
+    return _robust_cube(Y)
+
+
 NBINS = 4   # edge strength buckets (controls line boldness, and click-rebuild)
 
 
@@ -692,9 +738,17 @@ def render_graph3d(labels, attns, hiddens, args):
     for idx, (title, mat) in enumerate(panels):
         L = resolve_layer(args.layers[0] if args.per_head else args.layers[idx],
                           len(fattns))
-        coords = project_3d(fhiddens[L + 1], args.proj)    # layer-L output states
-        # 2) pull same-sentence tokens together so sentences read as spatial groups
-        coords = sentence_pull(coords, fsids, args.sentence_pull)
+        # 1b) project to 3D. 'graph' minimizes distance between same-meaning /
+        #     same-sentence tokens directly (Laplacian eigenmaps); pca/umap don't.
+        if args.proj == "graph":
+            coords = project_graph(fhiddens[L + 1], fsids, flabels,
+                                   sent_weight=args.graph_sent_weight)
+        else:
+            coords = project_3d(fhiddens[L + 1], args.proj)
+        # 2) gently pull same-sentence tokens together (the graph projection already
+        #    groups them, so a lighter pull avoids collapsing sentences to points)
+        pull = min(args.sentence_pull, 0.25) if args.proj == "graph" else args.sentence_pull
+        coords = sentence_pull(coords, fsids, pull)
         # 3) cluster the surviving tokens into meaningful units
         if args.cluster == "none":
             cids = np.arange(len(flabels))
@@ -1004,9 +1058,14 @@ def main():
     p.add_argument("--style", choices=["graph", "surface", "arc"], default="graph",
                    help="graph=interactive 3D token node-link graph (default); "
                         "surface=3D matrix terrain; arc=2D arc diagram")
-    p.add_argument("--proj", choices=["pca", "umap"], default="pca",
-                   help="how to place tokens in 3D for --style graph "
-                        "(pca: no deps; umap: better clusters, needs umap-learn)")
+    p.add_argument("--proj", choices=["graph", "pca", "umap"], default="graph",
+                   help="3D layout for --style graph. graph (default): Laplacian "
+                        "eigenmaps that MINIMIZE distance between same-meaning and "
+                        "same-sentence tokens; pca: variance-preserving; umap: "
+                        "neighborhood embedding (needs umap-learn)")
+    p.add_argument("--graph-sent-weight", type=float, default=1.0,
+                   help="--proj graph: attraction added to every same-sentence pair "
+                        "(higher → sentences pack tighter; default 1.0)")
     p.add_argument("--cluster", choices=["attention", "embedding", "none"],
                    default="attention",
                    help="group surviving tokens into meaningful units, colored per "
