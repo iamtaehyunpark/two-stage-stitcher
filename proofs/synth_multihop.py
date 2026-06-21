@@ -34,28 +34,25 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from proofs.hotpot import prep_example, _paragraph_block   # reuse the real builder
 
 # ── invented vocabulary (unguessable: coined institutions / surnames / placenames) ──
-ANCHORS = [
-    "the Zelmar Institute", "the Orrin Conservatory", "the Pell Foundation",
-    "the Vantis Academy", "the Drennel Society", "the Mossgate Trust",
-    "the Halloran Bureau", "the Quennox Guild", "the Ferrant College",
-    "the Sable Repository", "the Wend Observatory", "the Castellan Lyceum",
-    "the Inwick Athenaeum", "the Pryor Assembly", "the Tarn Collegium",
-    "the Velm Chapterhouse", "the Olcott Conclave", "the Rontide Workshop",
-    "the Bellmark Hall", "the Cindrel Office",
-]
-PEOPLE = [
-    "Oolan Pretsky", "Vessa Trundle", "Marek Ondwell", "Sabriel Crow",
-    "Doran Velleth", "Imrit Sallow", "Petra Munby", "Calix Wren",
-    "Norel Fanshawe", "Brisa Oxley", "Teodric Vale", "Ysolde Marrin",
-    "Garran Plume", "Lenna Quist", "Osmer Hatch", "Rue Demarco",
-    "Falk Trevise", "Wyn Adair", "Corvin Belisle", "Mirae Tollan",
-]
-PLACES = [
-    "Crennick", "Dunmarsh", "Velsworth", "Harrowby", "Tollgate Fen",
-    "Pellan Reach", "Orrin Hollow", "Sable Mere", "Wend Cross", "Marrow Down",
-    "Quist Vale", "Hatchford", "Belisle Strand", "Tarn Edge", "Inwick Moor",
-    "Castellan Bay", "Drennel Spur", "Vantis Cove", "Ferrant Bly", "Olcott Reach",
-]
+# Compositional vocab so the control can scale past n=30 (the verdict's power floor) while
+# staying unique per item — the answer (a PLACE) must appear exactly once per doc, so we
+# need many distinct invented places. Two-part composition gives 60–110 distinct tokens
+# each from short stem lists; `selftest` asserts distinctness and the per-doc invariants.
+_INST_STEM = ["Zelmar", "Orrin", "Pell", "Vantis", "Drennel", "Mossgate", "Halloran",
+              "Quennox", "Ferrant", "Sable", "Wend", "Castellan", "Inwick", "Pryor",
+              "Tarn", "Velm", "Olcott", "Rontide", "Bellmark", "Cindrel"]
+_INST_KIND = ["Institute", "Conservatory", "Foundation", "Society"]
+ANCHORS = [f"the {s} {k}" for k in _INST_KIND for s in _INST_STEM]            # 80
+
+_FIRST = ["Oolan", "Vessa", "Marek", "Sabriel", "Doran", "Imrit", "Petra", "Calix",
+          "Norel", "Brisa", "Teodric", "Ysolde", "Garran", "Lenna", "Osmer", "Rue"]
+_LAST = ["Pretsky", "Trundle", "Ondwell", "Crow", "Velleth", "Sallow"]
+PEOPLE = [f"{f} {l}" for l in _LAST for f in _FIRST]                          # 96
+
+_PLACE_A = ["Cren", "Dun", "Vels", "Harrow", "Toll", "Pellan", "Orrin", "Sable",
+            "Wend", "Marrow", "Quist", "Hatch", "Belisle", "Tarn", "Inwick", "Castel"]
+_PLACE_B = ["nick", "marsh", "worth", "by", "gate", " holt", "mere"]
+PLACES = [f"{a}{b}" for b in _PLACE_B for a in _PLACE_A]                      # 112
 
 # Relation families: each makes the bridge GENUINELY required — fact1 names the bridge
 # person for the anchor, fact2 places that person; the question asks the place of the
@@ -133,32 +130,38 @@ def build_multihop(n=20):
 
 
 # ── single-hop parity control (latent vs text MUST tie here) ─────────────────────
-PARITY = [
-    ("the Marn Array", "override sigil", "Veltris", "What is the override sigil of the Marn Array?"),
-    ("the Calder Engine", "primary coolant", "br-fluid Yune", "What is the primary coolant of the Calder Engine?"),
-    ("the Selvat Codex", "binding clasp", "a Wren-lock", "What kind of binding clasp does the Selvat Codex use?"),
-    ("the Ottenby Beacon", "signal colour", "pale Drennel green", "What is the signal colour of the Ottenby Beacon?"),
-    ("the Halver Press", "house typeface", "Mossgate Antiqua", "What is the house typeface of the Halver Press?"),
-    ("the Pinnow Vault", "access phrase", "Quennox-and-salt", "What is the access phrase of the Pinnow Vault?"),
-]
+# Procedural, single-token coined values so strict scoring isn't stressed by answer FORMAT
+# (the old multi-word vals like "pale Drennel green" conflated format with the parity test).
+_PSUBJ_STEM = ["Marn", "Calder", "Selvat", "Ottenby", "Halver", "Pinnow", "Brindle",
+               "Caraway", "Wexil", "Dorrant", "Plenby", "Surrow"]
+_PSUBJ_KIND = ["Array", "Engine", "Codex", "Beacon"]
+P_SUBJ = [f"the {s} {k}" for k in _PSUBJ_KIND for s in _PSUBJ_STEM]           # 48
+P_ATTRS = ["override sigil", "primary coolant", "binding clasp", "signal colour",
+           "house cipher", "access phrase", "calibration tone", "anchor glyph"]
+_VS1 = ["Vel", "Yu", "Wren", "Dren", "Moss", "Quen", "Cal", "Bry", "Ors", "Pell",
+        "Sur", "Hal", "Tor", "Vex", "Lun", "Mar"]
+_VS2 = ["tris", "ne", "lock", "gren", "font", "salt", "tone", "reth"]
+P_VALS = [f"{a}{b}" for b in _VS2 for a in _VS1]                              # 128
 
 
-def build_parity():
+def build_parity(n=32):
     """Single-sentence extraction items (one gold sentence, in a gold paragraph scattered
     among distractors). No bridge — pure extraction, where injected latent and retrieved
-    text should score identically."""
+    text should score identically (a gap here means the prompt framing flatters one side)."""
     recs = []
-    for i, (subj, attr, val, q) in enumerate(PARITY):
+    for i in range(n):
+        subj, attr, val = P_SUBJ[i], P_ATTRS[i % len(P_ATTRS)], P_VALS[i]
+        q = f"What is the {attr} of {subj}?"
         gold = f"The {attr} of {subj} is {val}. "
-        para_gold = [f"{subj} is documented in several places. ", gold]   # sent_id 1
         titles = [subj]
-        sentences = [para_gold]
-        # near-miss distractors: same attribute, wrong subject+value
+        sentences = [[f"{subj} is documented in several places. ", gold]]   # sent_id 1
+        # near-miss distractors: same attribute slot, wrong subject + wrong value
         for j in range(4):
-            k = (i + j + 1) % len(PARITY)
-            s2, a2, v2, _ = PARITY[k]
-            titles.append(f"{s2} (note {j})")
-            sentences.append([f"The {a2} of {s2} is {v2}. ",
+            k = (i + j + 1) % len(P_SUBJ)
+            s2 = P_SUBJ[k] + f" (note {j})"
+            v2 = P_VALS[(i + j + 1) % len(P_VALS)]
+            titles.append(s2)
+            sentences.append([f"The {attr} of {s2} is {v2}. ",
                               f"Unrelated remark number {j}. "])
         order = [1, 0, 2, 3, 4][:len(titles)]
         titles = [titles[t] for t in order]
@@ -173,19 +176,24 @@ def build_parity():
         assert rec is not None, f"parity item {i} failed to build"
         rec["hops"] = 1
         rec["arm"] = "synth_parity"
-        rec["decoy_values"] = [PARITY[(i + j + 1) % len(PARITY)][2] for j in range(3)]
+        rec["decoy_values"] = [P_VALS[(i + j + 1) % len(P_VALS)] for j in range(3)]
         recs.append(rec)
     return recs
 
 
-def build_all(n_multihop=20):
-    return build_multihop(n_multihop) + build_parity()
+def build_all(n_multihop=40, n_parity=32):
+    return build_multihop(n_multihop) + build_parity(n_parity)
 
 
 # ── selftest (pure string, no model) ──────────────────────────────────────────────
 def selftest():
-    mh, par = build_multihop(20), build_parity()
-    assert len(mh) == 20 and len(par) == len(PARITY)
+    # vocab must be distinct so per-doc answer uniqueness holds at scale
+    for name, pool in [("ANCHORS", ANCHORS), ("PEOPLE", PEOPLE), ("PLACES", PLACES),
+                       ("P_SUBJ", P_SUBJ), ("P_VALS", P_VALS)]:
+        assert len(set(pool)) == len(pool), f"{name} has duplicates"
+    assert len(PLACES) >= 40 and len(P_VALS) >= 32, "not enough unique answers to scale"
+    mh, par = build_multihop(40), build_parity(32)
+    assert len(mh) == 40 and len(par) == 32
     for rec in mh:
         doc, q, ans = rec["doc_text"], rec["question"], rec["answer"]
         # bridge truly required: neither gold sentence alone names BOTH the anchor link

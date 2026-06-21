@@ -614,6 +614,44 @@ def _verdict_gloss(status):
 
 
 # ════════════════════════════════════════════════════════════════════════════════
+# Inspector — eyeball WHY latent_sparse scores the way it does
+# ════════════════════════════════════════════════════════════════════════════════
+def show_disagreements(result, n, cond="latent_sparse"):
+    """Print items where `cond` has the gold answer somewhere (lenient) but fails strict —
+    the hedge/format cases — alongside the clean text_gold answer. This is how you tell a
+    REPRESENTATION failure (no gold, hallucination) from a SCORING artifact (gold present
+    but the model hedged in the first clause, or the <think> truncated to empty). The first
+    is fatal to the project; the second is fixable scoring/budget."""
+    recs = result.get("records", [])
+    print("\n" + "=" * 80)
+    print(f"INSPECT [{cond}] — gold present (lenient) but strict-fail, of {len(recs)} items")
+    n_hedge = n_empty = n_clean = 0
+    shown = []
+    for r in recs:
+        sc = r["scores"].get(cond, {})
+        ans = r["answers"].get(cond, "")
+        clause = first_clause(ans)
+        if sc.get("lenient") and not sc.get("strict"):
+            if not clause.strip():
+                n_empty += 1                 # truncated <think> → empty (raise think budget)
+            else:
+                n_hedge += 1                 # hedged/negated first clause (scoring penalty)
+            if len(shown) < n:
+                shown.append((r, ans, clause))
+        elif sc.get("strict"):
+            n_clean += 1
+    print(f"  clean strict-pass: {n_clean} | gold-present-but-strict-fail: "
+          f"{n_hedge + n_empty}  (hedged {n_hedge}, empty/truncated {n_empty})")
+    for r, ans, clause in shown:
+        print(f"\n  [{r['id']}] gold={r['gold']!r}")
+        print(f"    {cond} first-clause : {clause[:160]!r}")
+        print(f"    {cond} full(≤300)   : {ans[:300]!r}")
+        print(f"    text_gold first     : {first_clause(r['answers'].get('text_gold',''))[:120]!r}")
+    if not shown:
+        print("  (none — lenient and strict agree for this condition)")
+
+
+# ════════════════════════════════════════════════════════════════════════════════
 # Candidate loading per arm
 # ════════════════════════════════════════════════════════════════════════════════
 def load_candidates(arm, args):
@@ -622,7 +660,7 @@ def load_candidates(arm, args):
     if arm == "synth_multihop":
         return synth_multihop.build_multihop(args.synth_n)
     if arm == "synth_parity":
-        return synth_multihop.build_parity()
+        return synth_multihop.build_parity(args.parity_n)
     raise SystemExit(f"unknown arm {arm!r}")
 
 
@@ -664,11 +702,18 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--rescore", default=None, metavar="PATH",
                     help="re-score a saved p5 run with current scorers; no model load")
+    ap.add_argument("--show", type=int, default=0, metavar="N",
+                    help="with --rescore: print up to N latent_sparse answers where the gold "
+                         "is present (lenient) but strict fails — eyeball hedge vs truncation "
+                         "vs real failure")
     ap.add_argument("--arm", default="hotpot",
                     choices=["hotpot", "synth_multihop", "synth_parity"])
     ap.add_argument("--max-candidates", type=int, default=400,
                     help="HotpotQA candidate pool to gate through (oversample for attrition)")
-    ap.add_argument("--synth-n", type=int, default=20, help="synthetic multihop item count")
+    ap.add_argument("--synth-n", type=int, default=40,
+                    help="synthetic multihop item count (≥30 to clear the verdict's power floor)")
+    ap.add_argument("--parity-n", type=int, default=32,
+                    help="single-hop parity item count (≥30 to clear the power floor)")
     ap.add_argument("--layer", type=int, default=12)
     ap.add_argument("--no-think", dest="think", action="store_false",
                     help="suppress reasoning (smoke only; Proof 5 is think-ON)")
@@ -710,6 +755,8 @@ def main():
         v = report(result, agg, result.get("gate_summary"), result.get("arm", "hotpot"))
         result["aggregate"] = agg
         result["verdict"] = v
+        if args.show:
+            show_disagreements(result, args.show)
         out = args.out if args.out != "proofs/data/p5.json" else args.rescore
         with open(out, "w") as f:
             json.dump(result, f, indent=2, default=str)
