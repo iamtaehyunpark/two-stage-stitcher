@@ -124,21 +124,48 @@ class _HashBackend:
 
 
 class _BGEBackend:
-    """BAAI/bge-large-en-v1.5 via sentence-transformers. Query side prepends the BGE
-    retrieval instruction; passage side is raw. Normalized embeddings → cosine = dot."""
+    """BAAI/bge-large-en-v1.5. Prefers sentence-transformers; falls back to plain
+    transformers (CLS pooling + L2 normalize, BGE's documented recipe) when sentence-
+    transformers fails to import/load — that package pins a narrow transformers range and
+    breaks against the transformers the 70B needs (the `PreTrainedConfig` ImportError).
+    The fallback depends only on transformers, which is already required. Query side
+    prepends the BGE retrieval instruction; passage side is raw."""
 
     def __init__(self, device="cpu", model_name="BAAI/bge-large-en-v1.5"):
-        from sentence_transformers import SentenceTransformer
-        self.model = SentenceTransformer(model_name, device=device)
+        self.device, self.mode = device, None
+        try:
+            from sentence_transformers import SentenceTransformer
+            self.st = SentenceTransformer(model_name, device=device)
+            self.mode = "st"
+        except Exception as e:
+            print(f"  [retriever] sentence-transformers unavailable ({type(e).__name__}); "
+                  "using transformers BGE fallback")
+            from transformers import AutoTokenizer, AutoModel
+            self.tok = AutoTokenizer.from_pretrained(model_name)
+            self.hf = AutoModel.from_pretrained(model_name).to(device).eval()
+            self.mode = "hf"
+
+    def _encode(self, texts):
+        if self.mode == "st":
+            return self.st.encode(list(texts), normalize_embeddings=True,
+                                  convert_to_numpy=True, show_progress_bar=False)
+        import torch
+        out = []
+        for i in range(0, len(texts), 16):
+            batch = list(texts[i:i + 16])
+            enc = self.tok(batch, padding=True, truncation=True, max_length=512,
+                           return_tensors="pt").to(self.device)
+            with torch.no_grad():
+                h = self.hf(**enc).last_hidden_state[:, 0]      # CLS token
+                h = torch.nn.functional.normalize(h, p=2, dim=1)
+            out.extend(h.cpu().tolist())
+        return out
 
     def encode_passages(self, texts):
-        return self.model.encode(list(texts), normalize_embeddings=True,
-                                 convert_to_numpy=True, show_progress_bar=False)
+        return self._encode(list(texts))
 
     def encode_queries(self, texts):
-        q = [BGE_QUERY_INSTRUCTION + t for t in texts]
-        return self.model.encode(q, normalize_embeddings=True,
-                                 convert_to_numpy=True, show_progress_bar=False)
+        return self._encode([BGE_QUERY_INSTRUCTION + t for t in texts])
 
 
 def make_backend(kind="bge", device="cpu"):

@@ -725,6 +725,16 @@ def report(result, agg, gate_summary, arm):
     print(f"    text_rag@best ({tr['n_fail']} fails): retrieval-miss {tr['retrieval_miss']} "
           f"(not a reasoning loss), reasoning-fail {tr['reasoning_fail']} (the fair loss)")
 
+    # judge sanity: if the judge scores the A ceiling far below its strict rate, the judge
+    # pass is broken (e.g. empty generations defaulting to INCORRECT) — its numbers, and any
+    # judge-based verdict, are not trustworthy for this run.
+    if HEADLINE_SCORER == "judge":
+        a_j, a_s = agg["table"]["A"].get("judge"), agg["table"]["A"].get("strict")
+        if a_j is not None and a_s is not None and a_s >= 0.8 and a_j < 0.5:
+            print(f"\n  !!! JUDGE UNRELIABLE: A scores strict={a_s} but judge={a_j} "
+                  "(the judge returned no parseable verdict — likely a broken generation "
+                  "env). Ignore the judge column and verdict for this run; re-judge.")
+
     v = verdict(agg, arm)
     print("\n  " + "-" * 76)
     print(f"  VERDICT [{arm}]: {v['status']}")
@@ -792,6 +802,21 @@ def show_disagreements(result, n, cond="latent_sparse"):
         print("  (none — lenient and strict agree for this condition)")
 
 
+def dump_condition(result, cond, n):
+    """Print the first N raw answers for `cond` regardless of score, beside gold and the
+    needle count — for diagnosing a condition that fails everywhere (e.g. latent_sparse =
+    0.00 on parity, where --show finds nothing because lenient is 0). Shows whether the
+    gold is absent (injection not transferring) vs present-but-mis-scored."""
+    recs = result.get("records", [])
+    print("\n" + "=" * 80)
+    print(f"DUMP [{cond}] — first {n} raw answers of {len(recs)} items")
+    for r in recs[:n]:
+        ans = r["answers"].get(cond, "<none>")
+        print(f"\n  [{r['id']}] gold={r['gold']!r}  k_needle={r.get('k_needle')}  "
+              f"lenient={r['scores'].get(cond, {}).get('lenient')}")
+        print(f"    {ans[:320]!r}")
+
+
 # ════════════════════════════════════════════════════════════════════════════════
 # Candidate loading per arm
 # ════════════════════════════════════════════════════════════════════════════════
@@ -851,6 +876,9 @@ def main():
                     help="LLM-judge a SAVED run: load the model, judge each saved answer's "
                          "FINAL answer vs the reference (no main re-generation), add a 'judge' "
                          "scorer and make it the headline. The authoritative cross-check.")
+    ap.add_argument("--dump-cond", default=None, metavar="COND",
+                    help="with --rescore: print raw answers for a condition (e.g. "
+                         "latent_sparse) regardless of score — diagnose a 0.00 condition")
     ap.add_argument("--arm", default="hotpot",
                     choices=["hotpot", "synth_multihop", "synth_parity"])
     ap.add_argument("--max-candidates", type=int, default=400,
@@ -902,6 +930,8 @@ def main():
         result["verdict"] = v
         if args.show:
             show_disagreements(result, args.show)
+        if args.dump_cond:
+            dump_condition(result, args.dump_cond, args.show or 12)
         out = args.out if args.out != "proofs/data/p5.json" else args.rescore
         with open(out, "w") as f:
             json.dump(result, f, indent=2, default=str)
