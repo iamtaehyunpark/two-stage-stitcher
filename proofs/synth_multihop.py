@@ -60,13 +60,16 @@ PLACES = [f"{a}{b}" for b in _PLACE_B for a in _PLACE_A]                      # 
 FAMILIES = [
     {"f1": "{anchor} was for many years overseen by {person}.",
      "f2": "{person} was born in the town of {place}.",
-     "q":  "In which town was the person who oversaw {anchor} born?"},
+     "q":  "In which town was the person who oversaw {anchor} born?",
+     "q1": "Who oversaw {anchor} for many years?"},
     {"f1": "The founding charter of {anchor} was drafted by {person}.",
      "f2": "{person} spent every summer at {place}.",
-     "q":  "Where did the person who drafted the founding charter of {anchor} spend the summers?"},
+     "q":  "Where did the person who drafted the founding charter of {anchor} spend the summers?",
+     "q1": "Who drafted the founding charter of {anchor}?"},
     {"f1": "The annual lecture at {anchor} is delivered by {person}.",
      "f2": "{person} keeps a private library in {place}.",
-     "q":  "In which place does the person who delivers the annual lecture at {anchor} keep a private library?"},
+     "q":  "In which place does the person who delivers the annual lecture at {anchor} keep a private library?",
+     "q1": "Who delivers the annual lecture at {anchor}?"},
 ]
 
 
@@ -130,53 +133,44 @@ def build_multihop(n=20):
 
 
 # ── single-hop parity control (latent vs text MUST tie here) ─────────────────────
-# Procedural, single-token coined values so strict scoring isn't stressed by answer FORMAT
-# (the old multi-word vals like "pale Drennel green" conflated format with the parity test).
-_PSUBJ_STEM = ["Marn", "Calder", "Selvat", "Ottenby", "Halver", "Pinnow", "Brindle",
-               "Caraway", "Wexil", "Dorrant", "Plenby", "Surrow"]
-_PSUBJ_KIND = ["Array", "Engine", "Codex", "Beacon"]
-P_SUBJ = [f"the {s} {k}" for k in _PSUBJ_KIND for s in _PSUBJ_STEM]           # 48
-P_ATTRS = ["override sigil", "primary coolant", "binding clasp", "signal colour",
-           "house cipher", "access phrase", "calibration tone", "anchor glyph"]
-_VS1 = ["Vel", "Yu", "Wren", "Dren", "Moss", "Quen", "Cal", "Bry", "Ors", "Pell",
-        "Sur", "Hal", "Tor", "Vex", "Lun", "Mar"]
-_VS2 = ["tris", "ne", "lock", "gren", "font", "salt", "tone", "reth"]
-P_VALS = [f"{a}{b}" for b in _VS2 for a in _VS1]                              # 128
-
-
+# This is the FIRST HOP of a multihop item (anchor → person), asked directly. The answer is
+# a COINED person the model cannot confabulate from priors, so it is forced to read the
+# injection — isolating single-hop extraction from multi-hop binding. The earlier framing
+# ("the primary coolant of X is …") invited world-knowledge confabulation ("coolant →
+# water") that the *sparse* injection couldn't override, which conflated prior-strength with
+# the extraction test and made latent_sparse fail for the wrong reason. Reusing the multihop
+# entities keeps the no-prior property identical across the two arms.
 def build_parity(n=32):
-    """Single-sentence extraction items (one gold sentence, in a gold paragraph scattered
-    among distractors). No bridge — pure extraction, where injected latent and retrieved
-    text should score identically (a gap here means the prompt framing flatters one side)."""
     recs = []
     for i in range(n):
-        subj, attr, val = P_SUBJ[i], P_ATTRS[i % len(P_ATTRS)], P_VALS[i]
-        q = f"What is the {attr} of {subj}?"
-        gold = f"The {attr} of {subj} is {val}. "
-        titles = [subj]
-        sentences = [[f"{subj} is documented in several places. ", gold]]   # sent_id 1
-        # near-miss distractors: same attribute slot, wrong subject + wrong value
+        anchor, person = ANCHORS[i], PEOPLE[i]
+        fam = FAMILIES[i % len(FAMILIES)]
+        f1 = fam["f1"].format(anchor=anchor, person=person)
+        q = fam["q1"].format(anchor=anchor)
+        para_gold = [f"{anchor} has a long and well-documented history. ", f1 + " "]  # sent_id 1
+        titles, sentences = [anchor], [para_gold]
+        # near-miss distractors: same relation, other anchors → other (coined) persons
         for j in range(4):
-            k = (i + j + 1) % len(P_SUBJ)
-            s2 = P_SUBJ[k] + f" (note {j})"
-            v2 = P_VALS[(i + j + 1) % len(P_VALS)]
-            titles.append(s2)
-            sentences.append([f"The {attr} of {s2} is {v2}. ",
-                              f"Unrelated remark number {j}. "])
+            k = (i + j + 1) % len(ANCHORS)
+            if k == i:
+                k = (k + 5) % len(ANCHORS)
+            titles.append(ANCHORS[k])
+            sentences.append([fam["f1"].format(anchor=ANCHORS[k], person=PEOPLE[k]) + " ",
+                              f"{ANCHORS[k]} keeps no other records of note. "])
         order = [1, 0, 2, 3, 4][:len(titles)]
         titles = [titles[t] for t in order]
         sentences = [sentences[t] for t in order]
         ex = {
-            "id": f"synth-sh-{i}", "question": q, "answer": val,
+            "id": f"synth-sh-{i}", "question": q, "answer": person,
             "type": "single", "level": "synthetic",
-            "supporting_facts": {"title": [subj], "sent_id": [1]},
+            "supporting_facts": {"title": [anchor], "sent_id": [1]},
             "context": {"title": titles, "sentences": sentences},
         }
         rec = prep_example(ex, min_gold=1)
         assert rec is not None, f"parity item {i} failed to build"
         rec["hops"] = 1
         rec["arm"] = "synth_parity"
-        rec["decoy_values"] = [P_VALS[(i + j + 1) % len(P_VALS)] for j in range(3)]
+        rec["decoy_values"] = [PEOPLE[(i + j + 1) % len(PEOPLE)] for j in range(3)]
         recs.append(rec)
     return recs
 
@@ -188,10 +182,9 @@ def build_all(n_multihop=40, n_parity=32):
 # ── selftest (pure string, no model) ──────────────────────────────────────────────
 def selftest():
     # vocab must be distinct so per-doc answer uniqueness holds at scale
-    for name, pool in [("ANCHORS", ANCHORS), ("PEOPLE", PEOPLE), ("PLACES", PLACES),
-                       ("P_SUBJ", P_SUBJ), ("P_VALS", P_VALS)]:
+    for name, pool in [("ANCHORS", ANCHORS), ("PEOPLE", PEOPLE), ("PLACES", PLACES)]:
         assert len(set(pool)) == len(pool), f"{name} has duplicates"
-    assert len(PLACES) >= 40 and len(P_VALS) >= 32, "not enough unique answers to scale"
+    assert len(PLACES) >= 40 and len(PEOPLE) >= 32, "not enough unique answers to scale"
     mh, par = build_multihop(40), build_parity(32)
     assert len(mh) == 40 and len(par) == 32
     for rec in mh:
@@ -211,10 +204,16 @@ def selftest():
     for rec in par:
         doc, q, ans = rec["doc_text"], rec["question"], rec["answer"]
         assert len(rec["gold_sentences"]) == 1, f"{rec['id']}: parity must be single-hop"
+        # coined answer (a person) the model can't confabulate, absent from the question,
+        # unique in the doc, and not equal to a decoy — a clean no-prior extraction control
         assert ans.lower() not in q.lower(), f"{rec['id']}: answer leaks into question"
         assert doc.lower().count(ans.lower()) == 1, f"{rec['id']}: answer not unique in doc"
+        assert ans not in rec.get("decoy_values", []), f"{rec['id']}: decoy == answer"
+        g = rec["gold_sentences"][0]
+        assert ans in doc[g["char_start"]:g["char_end"]], \
+            f"{rec['id']}: needle span must contain the answer (else sparse can't transfer it)"
     print(f"selftest: OK ({len(mh)} multihop + {len(par)} parity; "
-          "bridge-required, lexical-gap, unique-answer all hold)")
+          "no-prior coined answers, lexical-gap, unique-answer, needle-covers-answer all hold)")
     return True
 
 
