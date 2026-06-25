@@ -68,7 +68,7 @@ from proofs.common import (
 )
 from core.split_forward import capture_doc_cache, split_forward_generate
 from proofs.needles import token_positions_for_char_span, needle_positions
-from proofs.decimate import kept_indices
+from proofs.decimate import kept_indices, decimated_text
 from proofs.retriever import (
     make_backend, Retriever, retrieval_recall, tune_chunk_size, budget_matched_k,
 )
@@ -422,11 +422,13 @@ def run_eval(model, tok, gated, args, backend, resume_path=None):
     def snapshot():
         return {"layer": layer, "best_chunk": best_chunk, "chunk_scores": chunk_scores,
                 "ks": ks, "rag_labels": rag_labels, "canary_mismatch": canary_mismatch,
-                "dropped_no_needle": dropped, "records": records}
+                "dropped_no_needle": dropped,
+                "keep_rate": args.keep_rate, "dec_variant": args.dec_variant,
+                "records": records}
 
     cap = args.max_eval or len(gated)
     todo = [g for g in gated if g["id"] not in done_ids][:max(0, cap - len(records))]
-    n_gens = (4 if args.with_docnaive else 3) + len(rag_labels)
+    n_gens = (4 if args.with_docnaive else 3) + 2 + len(rag_labels)  # +2 decimated conds
     print(f"  eval plan: {len(records)} done, {len(todo)} to run this session "
           f"(cap {cap}, gated {len(gated)}); ~{n_gens} gens/item, think_max={m}")
 
@@ -481,13 +483,22 @@ def run_eval(model, tok, gated, args, backend, resume_path=None):
             q, layer, m)
         answers["text_gold"] = full_prefill_answer(model, tok, gold_text_of(rec), q, m,
                                                    max_length=args.max_doc_tokens)
+        # the DEPLOYABLE sparse handoff (Path-2-as-decimation): blindly thin the WHOLE doc
+        # at keep_rate (no oracle needle selection) and hand over the SAME kept tokens as
+        # latent vs text — the budget-matched Exp-3.1 mechanism in the Proof-5 grid.
+        kept = kept_indices(n_doc, needle_idx, args.keep_rate, args.dec_pattern,
+                            args.dec_variant, seed=args.dec_seed, keep_sink=True)
+        answers["latent_decimated"] = inject_answer_subset(
+            model, tok, cache, n_doc, kept, q, layer, m)
+        answers["text_decimated"] = full_prefill_answer(
+            model, tok, decimated_text(tok, ids, kept), q, m, max_length=args.max_doc_tokens)
         for label, _k in sweep:
             answers[f"text_rag@{label}"] = full_prefill_answer(
                 model, tok, rag[label]["text"], q, m, max_length=args.max_doc_tokens)
 
         records.append({
             "id": rec["id"], "question": q, "gold": gold, "type": rec.get("type", ""),
-            "decoy_values": decoys, "k_needle": len(needle_idx),
+            "decoy_values": decoys, "k_needle": len(needle_idx), "kept_count": len(kept),
             "recall_by_k": {label: rag[label]["recall"] for label, _k in sweep},
             "rag_k_used": {label: rag[label]["k"] for label, _k in sweep},
             "answers": answers,
@@ -508,7 +519,8 @@ def run_eval(model, tok, gated, args, backend, resume_path=None):
 # ════════════════════════════════════════════════════════════════════════════════
 # Aggregation, failure modes, headline, verdict
 # ════════════════════════════════════════════════════════════════════════════════
-CONDS = ["A", "latent_all_docnaive", "latent_all_qfair", "latent_sparse", "text_gold"]
+CONDS = ["A", "latent_all_docnaive", "latent_all_qfair", "latent_sparse", "text_gold",
+         "latent_decimated", "text_decimated"]
 
 
 def _rate(records, cond, scorer):
@@ -603,11 +615,14 @@ def aggregate(result):
         rb = _rate(records, f"text_rag@{best_k}", scorer) if best_k is not None else None
         sp_sub = _rate(retr_sub, "latent_sparse", scorer)
         rb_sub = _rate(retr_sub, f"text_rag@{best_k}", scorer) if best_k is not None else None
+        dl = _rate(records, "latent_decimated", scorer)
+        dt = _rate(records, "text_decimated", scorer)
         return {
             "repr__sparse_minus_textgold": _diff(sp, tg),                     # (1)
             "deploy_raw__sparse_minus_ragbest": _diff(sp, rb),                # (2) raw
             "deploy_retrieved__sparse_minus_ragbest": _diff(sp_sub, rb_sub),  # (2) fair subset
             "handoff__latentall_minus_A": _diff(la, a),                       # (3)
+            "decimated__latent_minus_text": _diff(dl, dt),                    # (4) deployable Path-2
         }
 
     headline = _headline(HEADLINE_SCORER)
@@ -714,6 +729,10 @@ def report(result, agg, gate_summary, arm):
     print(f"    (3) latent_all − A                         : "
           f"{_fmt(h['handoff__latentall_minus_A'])} ({_fmt(hs.get('handoff__latentall_minus_A'))})"
           "   ← whole-document handoff cost (≈0 hoped)")
+    print(f"    (4) latent_decimated − text_decimated      : "
+          f"{_fmt(h.get('decimated__latent_minus_text'))} "
+          f"({_fmt(hs.get('decimated__latent_minus_text'))})"
+          f"   ← DEPLOYABLE Path-2 (blind thin, keep≈{result.get('keep_rate', '?')})")
     print(f"    best RAG k = {h['best_rag_k']}  strict-by-k = {h['rag_strict_by_k']}")
 
     fm = agg["failure_modes"]
@@ -898,6 +917,15 @@ def main():
                          "rarely need 2048, and a truncated <think> already scores as "
                          "no-answer so over-truncation is visible, not silent.")
     ap.add_argument("--max-doc-tokens", type=int, default=4096)
+    # the DEPLOYABLE sparse handoff (Path-2-as-decimation): blindly thin the whole doc and
+    # hand over the same kept tokens as latent vs text. needle_decimated = no oracle needle
+    # knowledge (the realistic case). Lower --keep-rate toward the 3.1 text-collapse regime
+    # (~0.25) if 0.5 shows a tie.
+    ap.add_argument("--keep-rate", type=float, default=0.5)
+    ap.add_argument("--dec-variant", default="needle_decimated",
+                    choices=["needle_decimated", "needle_protected"])
+    ap.add_argument("--dec-pattern", default="strided", choices=["strided", "random"])
+    ap.add_argument("--dec-seed", type=int, default=0)
     ap.add_argument("--max-eval", type=int, default=None,
                     help="cap gated items evaluated this run (resume-safe; default = all). "
                          "Use e.g. 60 for a first verdict overnight, then rerun to extend.")
