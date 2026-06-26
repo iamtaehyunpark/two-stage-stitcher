@@ -56,7 +56,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from proofs.common import (
-    load_deepseek, full_prefill_answer, inject_answer_subset, normalize,
+    load_deepseek, full_prefill_answer, inject_answer, inject_answer_subset, normalize,
 )
 from core.split_forward import capture_doc_cache
 from proofs.needles import needle_positions
@@ -184,6 +184,7 @@ def run_eval(model, tok, gated, args, backend, resume_path=None):
     print(f"  eval plan: {len(records)} done, {len(todo)} to run (cap {cap}); "
           f"keep_rate={args.keep_rate} variant={args.dec_variant} think_max={m}")
 
+    canary = {"mismatch": prev.get("canary_mismatch", 0), "checked": bool(records)}
     for rec in todo:
         doc, q, gold = rec["doc_text"], rec["question"], rec["answer"]
         decoys = rec.get("decoy_values", [])
@@ -196,6 +197,28 @@ def run_eval(model, tok, gated, args, backend, resume_path=None):
         pre_ids = tok(PREFILL_PREFIX.format(document=doc), return_tensors="pt",
                       truncation=True, max_length=args.max_doc_tokens).input_ids
         qcache, _Yq, n_pre = capture_doc_cache(model, pre_ids, layer); del _Yq
+
+        # CANARY — inject ALL positions via the subset path must equal a full inject. If this
+        # mismatches, the subset-injection path is broken (the transformers-cache regression)
+        # and every latent_goldspan / latent_decimated number is garbage. Abort loudly.
+        if not canary["checked"]:
+            _set_think(False)
+            kept_all = kept_indices(n_doc, needle_idx, 1.0, "strided", "needle_decimated",
+                                    seed=0, keep_sink=True)
+            a_sub = inject_answer_subset(model, tok, cache, n_doc, kept_all, q, layer,
+                                         args.max_new_tokens)
+            a_full = inject_answer(model, tok, cache, n_doc, q, layer, args.max_new_tokens)
+            ok = a_sub.strip() == a_full.strip()
+            canary["mismatch"] += int(not ok)
+            canary["checked"] = True
+            print(f"  canary subset-all==full: {'OK' if ok else 'MISMATCH'}")
+            if not ok:
+                print("  !!! SUBSET-INJECTION PATH BROKEN — latent_goldspan/decimated will be\n"
+                      "      garbage. Re-validate the env (proofs/p3_path.py) and the transformers\n"
+                      "      version before trusting any latent number. ABORTING eval.")
+                del cache, qcache
+                return {**snapshot(), "canary_mismatch": canary["mismatch"], "aborted": True}
+            _set_think(args.think)
 
         goldspan_pos = needle_positions(needle_idx, keep_sink=True)
         kept = kept_indices(n_doc, needle_idx, args.keep_rate, args.dec_pattern,
@@ -247,7 +270,7 @@ def run_eval(model, tok, gated, args, backend, resume_path=None):
         del cache, qcache
         _free_cuda()
     print()
-    return snapshot()
+    return {**snapshot(), "canary_mismatch": canary["mismatch"]}
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -336,6 +359,10 @@ def report(result, agg):
     print("\n" + "=" * 80)
     print(f"PROOF 5.1 — goldspan / decimated grid  (L{result['layer']}, think-on, "
           f"keep_rate={result.get('keep_rate')}, primary={agg['primary']})")
+    cm = result.get("canary_mismatch")
+    if cm:
+        print("  !!! CANARY MISMATCH — subset-injection path is BROKEN; every latent_goldspan/"
+              "decimated number below is GARBAGE. Re-validate env (p3_path.py) + transformers.")
     print(f"  n={agg['n']}   budget: goldspan≈{agg['budget']['avg_k_goldspan']} pos, "
           f"decimated≈{agg['budget']['avg_k_decimated']} pos "
           f"({agg['budget']['ratio']}× more — (3) is NOT budget-matched)")
