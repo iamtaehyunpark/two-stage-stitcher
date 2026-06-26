@@ -1,6 +1,11 @@
 # PyTorch must be installed separately (cu126):
 #   pip install torch --index-url https://download.pytorch.org/whl/cu126
-transformers>=4.40.0
+# PIN to 4.x: core/split_forward.py manipulates transformers' private KV-cache
+# (DynamicCache) API. transformers 5.x changed it and silently breaks the SUBSET-injection
+# path (latent_goldspan/decimated -> 0) while leaving full-inject/text intact. Every green
+# Proof 0/3 run was on 4.x; every 5.x run failed the subset path. Do NOT let an install
+# (e.g. sentence-transformers) upgrade past 5.0.
+transformers>=4.40,<5
 accelerate>=0.34.0
 vllm>=0.4.0
 numpy>=1.26.0
@@ -8,5 +13,8 @@ scipy>=1.12.0
 tqdm>=4.66.0
 matplotlib>=3.7.0   # Exp 3.1 decimation curves (optional; plotting is guarded)
 datasets>=2.18.0          # Proof 5: HotpotQA distractor (proofs/hotpot.py)
-sentence-transformers>=2.7.0   # Proof 5: BGE-large text-RAG baseline (proofs/retriever.py)
+# sentence-transformers is OPTIONAL and DANGEROUS here: it re-pulls transformers 5.x and
+# breaks the subset-inject path. proofs/retriever.py has a transformers-only BGE fallback,
+# so DON'T install it — `pip uninstall sentence-transformers` if it crept in.
+# sentence-transformers>=2.7.0   # (disabled — use the transformers BGE fallback)
 plotly>=5.20.0   # interactive 3D attention map (proofs/attention_map.py --out *.html; optional, guarded)
