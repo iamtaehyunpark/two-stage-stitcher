@@ -29,7 +29,7 @@ from run_conditions import load_deepseek          # noqa: E402  (env-faithful lo
 from oracle_probe import strip_think               # noqa: E402
 from core.split_forward import (                                          # noqa: E402
     capture_doc_cache, split_forward_generate, subset_doc_cache,
-    subset_doc_cache_renumbered,
+    subset_doc_cache_renumbered, recompute_doc_cache_from_residual, kv_drift_upper,
 )
 
 
@@ -141,6 +141,33 @@ def inject_answer(model, tokenizer, doc_cache, n_doc, question, target_layer,
     injected true layer-`target_layer` states (split-forward)."""
     text = split_forward_generate(
         model, tokenizer, doc_cache, n_doc,
+        query_text=_with_think_control(QUERY_PROMPT.format(question=question)),
+        target_layer=target_layer, max_new_tokens=max_new_tokens,
+    )
+    return final_answer(text)
+
+
+def capture_document_residual(model, tokenizer, document, target_layer,
+                              max_doc_tokens=8192):
+    """Proof 2.0: like `capture_document` but also returns the layer-`target_layer`
+    residual `Y_doc` (the small (1, N, D) object an SLM would produce). Returns
+    (doc_cache, Y_doc, n_doc): the cache is the cache-inject reference, Y_doc is the
+    residual-inject handoff object."""
+    ids = tokenizer(document, return_tensors="pt", truncation=True,
+                    max_length=max_doc_tokens).input_ids
+    return capture_doc_cache(model, ids, target_layer)
+
+
+def inject_answer_residual(model, tokenizer, structure_cache, Y_doc, n_doc, question,
+                           target_layer, max_new_tokens=256):
+    """Proof 2.0 residual_inject: recompute the upper cache from the layer-`target_layer`
+    residual `Y_doc` (the SLM-producible object) — NOT the stored cache — and answer from
+    that. `structure_cache` supplies the empty L-layer container (pass the cache-inject
+    cache; its KV is cleared, never read)."""
+    resid_cache = recompute_doc_cache_from_residual(
+        model, Y_doc, n_doc, target_layer, structure_cache)
+    text = split_forward_generate(
+        model, tokenizer, resid_cache, n_doc,
         query_text=_with_think_control(QUERY_PROMPT.format(question=question)),
         target_layer=target_layer, max_new_tokens=max_new_tokens,
     )

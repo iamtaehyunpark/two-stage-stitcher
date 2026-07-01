@@ -191,6 +191,36 @@ def run(target_layer=3, n_new=12, seed=0, verbose=True):
         if not pass_f:
             print(f"    ref={ref_c}\n    got={got_f}")
 
+    # ── Invariant G — residual recompute == stored cache (Proof 2.0 plumbing) ─────
+    # Rebuild the upper-layer document cache from ONLY the captured layer-`target_layer`
+    # residual Y_doc (recompute_doc_cache_from_residual) and generate from it. Because the
+    # document is causal-first, this must reproduce the real split-forward (which reads the
+    # STORED cache) token-for-token. This is the CORRECTNESS half of Proof 2.0, provable on
+    # CPU without the 70B: if it fails, the residual→upper-stack plumbing (position_ids,
+    # causal mask, cache fill) is buggy — not the model, not the data. The behavioural half
+    # (does recall survive on real facts) still needs the 70B, but a G failure means don't
+    # bother running it.
+    from core.split_forward import recompute_doc_cache_from_residual
+    real_cache_g, Y_g, Ng = capture_doc_cache(model, doc_ids, target_layer, clear_lower=True)
+    got_stored_g = split_forward_generate(
+        model, tok, real_cache_g, n_doc=Ng, query_ids=q_ids,
+        target_layer=target_layer, max_new_tokens=n_new,
+        clear_lower=True, return_ids=True,
+    )
+    resid_cache_g = recompute_doc_cache_from_residual(
+        model, Y_g, Ng, target_layer, real_cache_g)
+    got_resid_g = split_forward_generate(
+        model, tok, resid_cache_g, n_doc=Ng, query_ids=q_ids,
+        target_layer=target_layer, max_new_tokens=n_new,
+        clear_lower=True, return_ids=True,
+    )
+    pass_g = got_resid_g == got_stored_g
+    ok &= pass_g
+    if verbose:
+        print(f"[G] residual recompute ident.: {'PASS' if pass_g else 'FAIL'}")
+        if not pass_g:
+            print(f"    stored={got_stored_g}\n    resid ={got_resid_g}")
+
     if verbose:
         print("=" * 48)
         print("ALL PASS — mechanism is trustworthy" if ok

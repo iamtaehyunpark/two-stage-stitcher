@@ -533,3 +533,114 @@ def split_forward_generate(
     if return_ids:
         return generated
     return tokenizer.decode(generated, skip_special_tokens=True).strip()
+
+
+# ── Proof 2.0: residual-inject (recompute the upper cache from the layer residual) ──
+# The Chain-1 handoff object is the captured KV cache (layers target_layer..L-1). An SLM
+# can realistically produce only the *layer-target_layer residual stream* Y_doc — one
+# (1, N, D) tensor — and let the LLM recompute the upper stack from it. This module's
+# header (lines 30-45) ASSERTS the two are equivalent for true states, because the
+# document is causal-first; it never implements or tests the second route. Proof 2.0 does.
+#
+# `recompute_doc_cache_from_residual` builds the residual-inject cache using ONLY
+# operations already proven elsewhere in this file: `_clone_cache` for a correctly-shaped
+# L-layer container, `_clear_cache_layers` to empty every layer (so not one stored key
+# survives — the recompute cannot secretly read the reference and pass as a hybrid), and
+# `_run_stage` to fill the upper layers by running Y_doc through them — the exact
+# concatenate-into-cache path `split_forward_generate` uses to append the query. This
+# sidesteps the DynamicCache first-write-at-a-nonzero-layer edge case (the reason
+# `capture_doc_cache` takes the full-forward route) without depending on it.
+
+@torch.no_grad()
+def recompute_doc_cache_from_residual(model, Y_doc: torch.Tensor, n_doc: int,
+                                      target_layer: int, structure_cache):
+    """
+    Build a document cache whose upper layers `target_layer … L-1` are RECOMPUTED from the
+    layer-`target_layer` residual stream `Y_doc` (1, N, D) alone — the small object an SLM
+    would produce — rather than captured from a full document forward
+    (`capture_doc_cache`, the cache-inject reference). Lower layers stay empty, exactly as
+    `clear_lower=True`.
+
+      Y_doc           : (1, N, D) the TRUE hidden states ENTERING `target_layer` — the
+                        `Y_doc` that `capture_doc_cache` already returns for the same doc.
+      n_doc           : N, the document length (must equal Y_doc's sequence length).
+      structure_cache : any DynamicCache with all L layers materialised for this doc —
+                        pass the cache-inject cache; it is deep-copied and fully cleared,
+                        so its stored keys/values do NOT leak into the recompute (they are
+                        only borrowed for their per-layer shape metadata).
+
+    The document is run through the upper stack as N causal tokens at positions 0…N-1 —
+    the same positions and default RoPE `capture_doc_cache`'s forward used — so each upper
+    layer computes and caches its own K/V from Y_doc flowing upward. Because the document
+    never attends to the (positionally-later) query, these recomputed upper K/V are
+    identical to the stored ones in theory; Proof 2.0 measures whether they are in fact,
+    and self-test invariant G proves the plumbing token-for-token on CPU.
+    """
+    L = len(model.model.layers)
+    N = int(n_doc)
+    if int(Y_doc.shape[1]) != N:
+        raise ValueError(f"Y_doc length {int(Y_doc.shape[1])} != n_doc {N}")
+    dtype = model.model.embed_tokens.weight.dtype
+    sig = _layer_param_names(model)
+    use_pe = _supports_position_embeddings(model)
+
+    # Correctly-shaped, fully-empty L-layer container (borrow structure, drop all KV).
+    cache = _clone_cache(structure_cache)
+    _clear_cache_layers(cache, range(0, L))
+    # Guard against the "secretly a hybrid" failure: every upper layer must be empty
+    # BEFORE the recompute, or the query would attend to leftover stored keys and the
+    # residual path would pass for the wrong reason.
+    for i in range(target_layer, L):
+        k, _v = _cache_get(cache, i)
+        if k is not None and k.shape[2] != 0:
+            raise RuntimeError(
+                f"residual recompute: layer {i} not cleared (len {k.shape[2]}); the "
+                "recompute would read stored KV — a hybrid, not a true recompute.")
+
+    dev0 = Y_doc.device
+    pos = torch.arange(0, N, device=dev0)[None, :]
+    pe = _rope(model, Y_doc, pos) if use_pe else None
+    mask = _causal_mask(N, dtype, dev0)                 # doc tokens: causal among themselves
+    cache_pos = torch.arange(0, N, device=dev0)
+    _run_stage(model, range(target_layer, L), Y_doc, mask, pos, cache, cache_pos, pe, sig)
+
+    # Guard: the recompute actually populated the upper layers with all N keys.
+    for i in range(target_layer, L):
+        k, _v = _cache_get(cache, i)
+        if k is None or k.shape[2] != N:
+            got = None if k is None else k.shape[2]
+            raise RuntimeError(
+                f"residual recompute: layer {i} holds {got} keys, expected {N}; the "
+                "upper-stack recompute did not fill the cache.")
+    return cache
+
+
+@torch.no_grad()
+def kv_drift_upper(cache_ref, cache_test, target_layer: int):
+    """Proof 2.0 diagnostic (#4): how far the recomputed upper K/V (`cache_test`) sit from
+    the stored ones (`cache_ref`), per layer `target_layer … L-1`. Returns mean cosine
+    similarity and mean squared error over K and V, averaged across the populated upper
+    layers. cos ≈ 1.0 / MSE ≈ 0 ⇒ the residual determines the cache, so any behavioural
+    gap is NOT numerical drift; a large MSE alongside a behavioural gap points at a
+    plumbing/precision bug instead of a structural fact about the handoff object."""
+    n = _cache_num_layers(cache_ref)
+    cos_k = cos_v = mse_k = mse_v = 0.0
+    cnt = 0
+    for i in range(target_layer, n):
+        kr, vr = _cache_get(cache_ref, i)
+        kt, vt = _cache_get(cache_test, i)
+        if kr is None or kt is None or kr.numel() == 0 or kt.numel() == 0:
+            continue
+        kt = kt.to(kr.device)
+        vt = vt.to(vr.device)
+        cos_k += torch.nn.functional.cosine_similarity(
+            kr.float().reshape(-1), kt.float().reshape(-1), dim=0).item()
+        cos_v += torch.nn.functional.cosine_similarity(
+            vr.float().reshape(-1), vt.float().reshape(-1), dim=0).item()
+        mse_k += torch.mean((kr.float() - kt.float()) ** 2).item()
+        mse_v += torch.mean((vr.float() - vt.float()) ** 2).item()
+        cnt += 1
+    if cnt == 0:
+        return {"cos_k": None, "cos_v": None, "mse_k": None, "mse_v": None, "layers": 0}
+    return {"cos_k": round(cos_k / cnt, 6), "cos_v": round(cos_v / cnt, 6),
+            "mse_k": mse_k / cnt, "mse_v": mse_v / cnt, "layers": cnt}

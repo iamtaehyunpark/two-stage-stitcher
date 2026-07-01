@@ -1,12 +1,39 @@
-# Proof Chain — Validating the Receiver Before Building the Sender
+# Proof Chain
 
-The project advances as a chain of falsifiable proofs. Each rung is a precondition
+The project advances as chains of falsifiable proofs. Each rung is a precondition
 for the next: **if one fails, every rung above it is moot.** They are ordered to kill
 the project as cheaply as possible.
 
+The work splits into two chains at the model boundary:
+
+- **[Chain 1 — the receiver](#chain-1--validating-the-receiver-frozen) (frozen).**
+  Every rung used a single model (DeepSeek) as both reader and reasoner, injecting
+  *true* captured states. It proved the receiver: injected LLM-native states are read
+  and reasoned over — within a model, in full, to 32k. Chain 1 is **done and its proofs
+  are true for what they tested.** It is frozen as the validated foundation: cited, not
+  rewritten. Rewriting it would either restate proven results under new numbers or
+  retroactively fold in cross-model assumptions the original runs never made — corrupting
+  a clean record.
+- **[Chain 2 — the outsourcing](#chain-2--reading-is-out-sourceable) (active).**
+  A *different, cheaper* reader enters. Two things change the moment the model boundary
+  is crossed. (1) The handoff object shifts from the *captured KV cache* to the *layer-12
+  residual stream* — an SLM can produce one `(N, d)` tensor per position and let the LLM
+  recompute the upper stack, but cannot produce 68 layers of cross-family KV. (2) The
+  economic claim shifts from *compression* (ship less — dead, Proof 5) to *outsourcing*
+  (ship the full read, but a cheap model produced it).
+
+**Chain 1 proved the receiver. Chain 2 proves the outsourcing.** Chain 1 was always the
+prerequisite Chain 2 is built on — not a thing Chain 2 replaces. The current frontier is
+**Proof 2.0** (residual-equivalence): the cheap, single-model rung that defines the target
+the sender must aim at.
+
+---
+
+# Chain 1 — Validating the Receiver (frozen)
+
 **Proofs 0–5 use only the LLM and TRUE captured layer-30 states — no Qwen, no stitcher.**
 This is deliberate: validate the *receiver* completely before building any *sender*.
-The SLM enters only at Proof 6.
+The SLM enters only at Proof 6 — which Chain 2 reshapes (see Proof 2.2).
 
 > **Result (2026-06-17):** Proofs 0–2 pass on synthetic facts, and a depth sweep
 > shows the assumed layer 30 is suboptimal — recall peaks shallow (≈1.0 at L12–14),
@@ -199,3 +226,227 @@ The first three rungs (0, 1, 2) are a single afternoon's script — `evaluate/or
 already implements the synthetic-fact / C-fails-gate / wrong-document control for the
 *single-vector* case. Proof 0's split-forward and Proof 1's *all-N* injection are the
 remaining pieces needed to run 0–2 end to end on multi-token true states.
+
+---
+
+# Chain 2 — Reading is *out*-sourceable
+
+Chain 1 proved reading transfers *within* a model. Chain 2 tests the thesis Chain 1 was
+always the prerequisite for: **reading done by a *cheaper, different* model transfers to
+the expensive one.** Every Chain 1 proof used DeepSeek as both reader and reasoner. Chain 2
+is where the SLM (Qwen) enters as the reader while the LLM stays the reasoner.
+
+Two reframings, forced by everything Chain 1 learned, define this chain:
+1. **Object:** the handoff is the **layer-12 residual stream** — one `(N, d)` tensor the
+   SLM can realistically produce — not the 68-layer KV cache Chain 1 injected. The LLM
+   recomputes layers 12→80 from it.
+2. **Claim:** the win is **outsourcing**, not compression. Chain 1's Proof 5 killed
+   sparse/compressed handoff (latent loses to *clean* text of the same spans). Chain 2
+   ships the *full* read — the bet is that a cheap model produced it, so the expensive
+   model never had to.
+
+Every rung is gated on the previous, and each can stop the project cheaply.
+
+| # | Proof | Proves | Pass | Fail | Status |
+|---|---|---|---|---|---|
+| 2.0 | Residual-equivalence | the small object suffices as the handoff target | `residual_inject ≈ cache_inject ≈ A`, clean per-item agreement | recompute-from-residual loses what the stored cache had → SLM on the hook for a bigger object | **IMPLEMENTED — awaiting run** (`proofs/p2_0_residual.py`; plumbing proven on CPU by self-test invariant G) |
+| 2.1 | Cross-family geometry (oracle map) | the SLM→LLM spaces are bridgeable | an *oracle-fit* map from Qwen states lets the LLM recall the fact | even an overfit oracle map fails → geometry fundamentally misaligned at L12; no stitcher saves it → **kills the outsourcing thesis** | pending 2.0 |
+| 2.2 | Learned outsourcing (the SLM stitcher) | a *trained* cheap reader bridges it | stitched L12 residuals recover recall at **full** handoff | translation is the real bottleneck (now known to be real, not architectural) | pending 2.1 |
+| 2.3 | Honest economics | SLM-reads-then-LLM-reasons costs less | SLM prefill + translate + LLM upper-stack-only < LLM full prefill, at equal accuracy | not cheaper → "outsourceable" is true but pointless (Proof-5-shaped stop, one level up) | pending 2.2 |
+| 2.4 | Error amplification | the SLM's approximation survives 68-layer recompute | recall tolerance ≥ the stitcher's achievable injected-state error | approximate L12 state gets amplified through the upper stack → breaks 2.2 in practice | pending 2.2 |
+| 2.5+ | Outsourced latent > outsourced text | it beats the boring alternative | latent handoff beats "SLM extracts text, feed the LLM tokens" — at length, across tokenizers | the Proof-5 ghost, one level up: outsourced *text* already does it | frontier |
+
+**The spine:** 2.0 the small object suffices (single-model) → 2.1 the cross-family gap is
+bridgeable (oracle, no training) → 2.2 a trained cheap reader bridges it (full handoff,
+behavioral loss) → 2.3 it's actually cheaper → 2.4 the error survives recompute → 2.5 it
+beats outsourced *text*.
+
+**The symmetry with Chain 1, and why it's honest.** Chain 1 ran 0→…→5 and its final rung
+was "does latent beat text" — it didn't, sparse. Chain 2 ends the same way one level up:
+"does *outsourced* latent beat *outsourced* text," and that should be expected to be the hard
+rung again. The residual-stream + full-handoff + behavioral-objective reframing gives it a
+*better* shot than sparse had, but the Proof-5 ghost is real — the thing to beat is still
+"just hand over the retrieved text," now produced by the SLM.
+
+---
+
+## Proof 2.0 — Residual-equivalence
+
+**The question.** Chain 1 always injected the captured **KV cache** (layers 12→79, the big
+object). An SLM can only realistically produce the **layer-12 residual stream** (one `(N, d)`
+tensor) and let the LLM recompute the upper stack. Before any cross-model work: *does
+injecting the true layer-12 residual stream, and recomputing layers 12→80, match injecting
+the captured cache?* If yes, the SLM has a small, well-defined target. If no, outsourcing is
+fighting a harder object than Chain 1's success implied.
+
+**Why it's not trivially yes.** Naively the cache *is* a deterministic function of the
+residual stream (K, V are linear projections of it), so recomputing should reproduce it
+exactly. Two things can break that:
+1. **Correctness.** The captured cache was produced in a forward where each layer's input was
+   the *real* previous layer's output. The recompute path injects at 12 and rebuilds 13…79
+   from there. For *true* states these should be identical — so a mismatch signals a **bug**
+   (position handling, dtype, the attention-sink token, cache bookkeeping), worth catching
+   before Chain 2 depends on it.
+2. **Numerical.** 68 layers of recompute in fp16 can drift. Probably negligible, but this run
+   tells you the floor.
+
+So Proof 2.0 is partly a *correctness check* (do the two paths agree for true states, as
+theory says) and partly a *setup* (establishing the residual stream as the target the SLM
+will produce). A clean pass means "the small object is sufficient and the plumbing is honest."
+
+**The three conditions**, all single-model (DeepSeek), same frozen operating point (L12,
+think-on, q-fair capture, strict + judge), on the existing zero-memory gated set:
+
+- **A** — full-document text prefill. The ceiling. (Already have it.)
+- **`cache_inject`** — the Chain-1 mechanism: capture the full layer-12+ KV cache, inject,
+  run 12→80 reading the *stored* cache. This is `latent_all` from Proof 5, the ~1.0
+  condition. The reference the residual path must match.
+- **`residual_inject`** — the new path: capture *only* the true layer-12 residual stream
+  `(N, d)`, inject it as the layer-12 input, and let the model **recompute** layers 12→80's
+  KV from it, rather than reading a stored cache. Then ask the question.
+
+The comparison is `residual_inject` vs `cache_inject` (and both vs A).
+
+**The one mechanism detail that matters.** In `cache_inject`, the query attends to stored K/V
+at every layer 12→79. In `residual_inject`, the query attends to K/V the model *computes on
+the fly* at each layer from the injected residual flowing upward. Concretely: inject the
+`(N, d)` residual at layer 12's input for the N document positions, then run the forward
+normally — layers 12→79 process those positions and produce their own KV, which the query then
+attends to. The difference from Chain 1's plumbing is that you're *not* pre-populating the
+cache at layers 13→79; you let the forward fill them. Everything else — `position_ids`, the
+query offset, the attention sink, think-suppression-off — stays exactly as the validated
+split-forward.
+
+**What to measure:**
+1. `residual_inject − cache_inject` (judge, strict) — **the headline.** ≈0 = the small object
+   suffices.
+2. `residual_inject − A` — does the residual path still equal reading (it should, if #1 is ≈0
+   and cache ≈ A).
+3. **Per-item agreement, not just aggregate.** Because this is partly a correctness check,
+   don't only compare pass-rates — check whether the two paths agree *item by item*. If
+   aggregates match but individual items disagree (one passes cache, fails residual, and vice
+   versa, netting to zero), that's a *different* and more worrying result than clean
+   agreement — the paths diverge and happen to average out. Report the confusion: items where
+   cache✓/residual✗ and cache✗/residual✓.
+4. **Raw-state numerical drift** (optional, cheap): for a few items, capture the layer-13…79
+   KV *both* ways (stored vs recomputed-from-residual) and measure cosine/MSE between them.
+   Tells you whether any behavioral gap is numerical drift or something structural. Not
+   required for the verdict, but it's the diagnostic if #1 comes back non-zero.
+
+**Interpretation, fixed in advance:**
+- `residual_inject ≈ cache_inject ≈ A`, clean per-item agreement → **the residual stream is a
+  sufficient handoff target.** The SLM's job is well-defined and *small* (produce one `(N, d)`
+  tensor at layer 12). Green light to Proof 2.1. The expected and hoped-for outcome.
+- `residual_inject < cache_inject` → recomputing the upper stack from the layer-12 residual
+  *loses* something the stored cache had. Two sub-cases, distinguished by #4: if the
+  recomputed KV is numerically far from stored → a plumbing/precision bug, fix it; if
+  numerically close but behavior differs → something genuinely lives in the stored upper-layer
+  cache that the layer-12 residual doesn't determine (surprising, needs investigation), and
+  the SLM would be on the hook for a bigger object.
+- Aggregates match but per-item disagreement is high → the paths aren't equivalent, they're
+  differently-lossy; investigate before trusting either.
+
+**Why this must run before Proof 2.1.** Proof 2.1 fits a transformation from Qwen's states to
+DeepSeek's *target*. That target has to be defined. If the residual stream is sufficient (2.0
+passes), the oracle map aims at `(N, d)` residuals — tractable. If only the full cache works
+(2.0 fails), the oracle map would have to produce 68 layers of cross-family, per-layer KV —
+effectively hopeless. So Proof 2.0 literally determines whether Proof 2.1 is a reasonable
+experiment or a doomed one. **You cannot design the sender until you know the smallest object
+the receiver accepts.**
+
+**Scope and cost.** Trivial. Single model, no training, reuses the existing gated set,
+scorers, and q-fair capture. Implemented in `proofs/p2_0_residual.py` (mirrors the `p5`
+gate → eval → verdict structure; checkpointed and resumable). The one new mechanism is
+`core.split_forward.recompute_doc_cache_from_residual`: it takes the layer-12 residual
+`Y_doc` that `capture_doc_cache` already returns and runs *only* layers 12→L-1 on it,
+filling a genuinely **empty** upper cache — an independent recompute, not the full forward.
+Run:
+
+```
+CUDA_VISIBLE_DEVICES=4,5,6,7 python proofs/p2_0_residual.py --arm synth_multihop \
+    --synth-n 40 --out proofs/data/p2_0.json
+```
+
+The correctness half is provable **without the 70B**: `python core/selftest_split_forward.py`
+now includes invariant **G**, which asserts the residual recompute reproduces the
+stored-cache split-forward token-for-token on a tiny CPU model. A G failure means the
+plumbing is broken — don't spend H200 time on the behavioural run until it passes.
+
+**The one implementation risk to watch.** `residual_inject` must recompute the upper cache
+from `Y_doc` with a genuinely **empty** upper cache — the failure mode is accidentally
+leaving stored upper-layer KV in place, so you're secretly testing a hybrid and #1 passes for
+the wrong reason. `recompute_doc_cache_from_residual` guards this structurally (it clears
+every layer and asserts length 0 before the recompute, length N after); the per-item
+agreement check (#3) and the KV-drift diagnostic (#4) are the behavioural guards on top.
+
+**Headline to watch:** `residual_inject − cache_inject`, judge, with per-item agreement. ≈0
+with clean agreement → the SLM has a small target and Chain 2 proceeds. Anything else → you've
+found a structural fact about the handoff object before spending a single training run on it.
+
+## Proof 2.1 — Cross-family geometry exists (oracle map, no training)
+
+**Claim:** there is *some* transformation of the SLM's document representation the LLM can
+reason over. **Experiment:** take Qwen's document states and DeepSeek's true layer-12 residuals
+(the target 2.0 defined) for the *same* documents; fit an **oracle** map (even overfit, even
+per-document) and inject the mapped states via the validated residual path. **Pass:** the
+oracle-fit map lets DeepSeek recall the fact → the spaces are bridgeable, translation is a
+learnable problem → green light to 2.2. **Fail:** even an overfit oracle map fails → the
+cross-family geometry is fundamentally misaligned at layer 12 and no stitcher will save it.
+This is the **falsifier for the whole outsourcing thesis**, and it uses **zero training** — the
+cheapest way to kill or greenlight Proof 2.2.
+
+## Proof 2.2 — Learned outsourcing (the SLM stitcher, full handoff)
+
+**Claim:** a *trained* SLM→LLM map produces layer-12 residuals good enough that recall
+survives — at **full-document** handoff. This is the real Proof 6, reshaped by everything
+learned: **full handoff** (sparse is dead — Proof 5), **residual-stream target** (small object
+— Proof 2.0), **behavioral objective** — KL between the injected model's logits and
+full-prefill's logits, *not* cosine (the lesson the post-mortem proved: cosine certifies
+nothing). Trained on the geometry Proof 2.1 proved bridgeable. **Pass:** stitched states
+recover the synthetic facts and fail the wrong-document control. **Fail:** translation is the
+bottleneck after all — now known to be *real* (not the architecture), worth investing in.
+
+## Proof 2.3 — The honest economics
+
+**Claim:** SLM-reads-then-LLM-reasons actually costs less than LLM-reads-itself, at equal
+accuracy. **Experiment:** measure SLM prefill + translation + the LLM's **upper-stack-only**
+forward, vs. LLM full prefill — including the cost the residual path incurs by making the LLM
+*recompute* layers 12→80 (you skipped 0–11, not the whole read). **Pass:** cheaper at equal
+accuracy. **Fail:** "outsourceable" is true but pointless — the same shape of honest stop as
+Proof 5, one level up.
+
+## Proof 2.4 — Error amplification (the sender's real risk)
+
+**Claim:** the SLM's approximation error, injected at layer 12, survives 68 layers of recompute.
+**Why its own rung:** unique to the residual path — a stitched (approximate) layer-12 state gets
+*amplified* through the recomputed upper stack, unlike an injected cache where the approximation
+stays local. This is the thing most likely to break Proof 2.2 in practice. **Experiment:**
+measure recall vs. injected-state error, find the tolerance, and check whether the stitcher's
+achievable accuracy (from 2.2) lands inside it.
+
+## Proofs 2.5+ — The frontier
+
+The old Chain-1 Proofs 7–9, now correctly placed one level up: cross-family **at length** (does
+the shallow layer hold across tokenizers at 32k), the honest baseline-to-beat, and whether the
+whole thing beats the boring alternative — **SLM extracts text, feed it to the LLM as tokens**.
+The Proof-5 ghost, back one level up: does *outsourced latent* beat *outsourced text*? Expect
+this to be the hard rung again.
+
+---
+
+## Chain 2 dependency structure
+
+- **2.0 gates the sender's target** — you cannot design the SLM until you know the smallest
+  object the receiver accepts. Single-model, cheap, runnable now.
+- **2.1 is the outsourcing falsifier** — if an oracle map can't bridge the geometry, no trained
+  one will. Zero training.
+- **2.2 is the only rung that trains the SLM** — earned only after 2.0 defines the target and
+  2.1 proves it reachable.
+- **2.3 + 2.4 size and stress the win** — is it cheaper, and does the approximation survive
+  recompute.
+- **2.5 proves you beat the boring baseline** — outsourced latent vs outsourced text, the
+  hard rung.
+
+The first runnable thing is **Proof 2.0**: cheap, single-model, no SLM, no training, reusing
+the existing `p5`-style harness. It's the afternoon that tells you whether the entire
+outsourcing chain aims at a small target or a hopeless one.
