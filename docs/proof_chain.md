@@ -37,16 +37,33 @@ The SLM enters only at Proof 6.
 > carried forward: latent recovery is **partial** (~0.6, as in 3.1), and Path-2
 > sparse-handoff is the weakest inject condition under stress (0.75). Receiver validated
 > end-to-end; **Proof 5 is earned.**
+>
+> **Result (2026-07-01):** Proof 5 (latent handoff vs. text-RAG) is an **honest stop for
+> the budget-matched sparse handoff.** On zero-memory synthetic 2-hop (n=40, L12, think-on,
+> LLM-judge), the receiver holds — `latent_all = A = 0.97` (full-document handoff ≈ reading)
+> — but the budget-matched **`latent_goldspan = 0.62` vs `text_goldspan = 1.00` (gap −0.375)**:
+> the sparse latent handoff loses to *clean* text of the same spans, uniformly across answer
+> length (−0.38 at 2–3 tok, −0.33 at 4+). The pre-registered sanity anchor passes on
+> coreference docs — **`dec_latent = 0.43` vs `dec_text = 0.00` (+0.433)**, replicating Exp
+> 3.1 — so the harness is sound. The pattern: **latent beats *decimated/degraded* text but
+> loses to *clean* text of the same content**, and nobody deploys shredded retrieval. On real
+> HotpotQA the gap is a near-tie (−0.07), but that is memory (43% closed-book discard) lifting
+> the floor — the synthetic control breaks the tie against latent. Scoring caveat: the LLM-
+> judge is authoritative (0.62); deterministic scorers bracketed 0.47–0.88 and are unreliable
+> on reasoning-aloud answers. Env caveat: **transformers 5.x silently breaks the subset-inject
+> path**, pinned to 4.x. Proof 5's bar (latent ≥ text-RAG at equal budget) is **not met**;
+> Proof 6 is not motivated by a sparse-handoff win. Full write-up:
+> [`proof_5_latent_vs_rag.md`](proof_5_latent_vs_rag.md).
 
 | # | Proof | Proves | Pass | Fail | Status |
 |---|---|---|---|---|---|
 | 0 | Split-forward plumbing | harness is correct | split-forward(true) ≈ A | plumbing bug; nothing below interpretable | **PASS** (clean at every layer 12–64) |
 | 1 | Injection premise | injected states are read & reasoned over | inject-all-N succeeds where C fails | premise broken → **stop project** | **CONFIRMED** (layer-dependent; ≈1.0 at L12–14) |
 | 2 | Wrong-doc falsifier | it's injection, not memory | wrong-doc fails X | "success" was memory → **falsified** | **PASS** (wrong-doc 0.00 at L12/24/25) |
-| 3 | Path resolution | full prefix vs sparse needles | (see outcomes) | — | **implemented** (`proofs/p3_path.py`, fixed at layer 12); awaiting run |
+| 3 | Path resolution | full prefix vs sparse needles | (see outcomes) | — | **PASS → PATH_2** (`proofs/p3_path.py`, L12: needles-only 0.84, random 0.00) |
 | 4 | Length scaling | survives long context | recall holds at 16k/32k+ | dies at length → premise unproven | **PASS** (≈1.0 to 32k at L12, depth-flat; hardened by 4.1 on 30 facts) |
-| 5 | Latent beats text-RAG | reason to exist | latent ≥ text-RAG at lower cost | dead weight vs RAG | **next** — receiver validated (0–4.1); motivated by Exp 3.1 + 4.1 (latent 0.61 vs text 0.03 at 32k) |
-| 6 | Stitcher reproduces states | the SLM works | stitched recovers facts | translation is the real bottleneck | pending (blocked by 5) |
+| 5 | Latent beats text-RAG | reason to exist | latent ≥ text-RAG at lower cost | dead weight vs RAG | **HONEST STOP** — sparse handoff loses to *clean* text of the same spans (goldspan 0.62 vs 1.00, judge); beats only *decimated* text (dec +0.43). Receiver holds (`latent_all=A`). Bar not met. See [`proof_5_latent_vs_rag.md`](proof_5_latent_vs_rag.md) |
+| 6 | Stitcher reproduces states | the SLM works | stitched recovers facts | translation is the real bottleneck | **not motivated by Proof 5** — no budget-matched sparse win over RAG |
 
 ---
 
