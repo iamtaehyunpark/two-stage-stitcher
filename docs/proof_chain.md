@@ -249,7 +249,7 @@ Every rung is gated on the previous, and each can stop the project cheaply.
 
 | # | Proof | Proves | Pass | Fail | Status |
 |---|---|---|---|---|---|
-| 2.0 | Residual-equivalence | the small object suffices as the handoff target | `residual_inject ≈ cache_inject ≈ A`, clean per-item agreement | recompute-from-residual loses what the stored cache had → SLM on the hook for a bigger object | **IMPLEMENTED — awaiting run** (`proofs/p2_0_residual.py`; plumbing proven on CPU by self-test invariant G) |
+| 2.0 | Residual-equivalence | the small object suffices as the handoff target | `residual_inject ≈ cache_inject ≈ A`, clean per-item agreement | recompute-from-residual loses what the stored cache had → SLM on the hook for a bigger object | **PASS — RESIDUAL_SUFFICIENT** (`proofs/p2_0_residual.py`; strict resid−cache = 0.000, judge −0.025 = 1/40, upper-KV cos ≈ 0.9999) |
 | 2.1 | Cross-family geometry (oracle map) | the SLM→LLM spaces are bridgeable | an *oracle-fit* map from Qwen states lets the LLM recall the fact | even an overfit oracle map fails → geometry fundamentally misaligned at L12; no stitcher saves it → **kills the outsourcing thesis** | pending 2.0 |
 | 2.2 | Learned outsourcing (the SLM stitcher) | a *trained* cheap reader bridges it | stitched L12 residuals recover recall at **full** handoff | translation is the real bottleneck (now known to be real, not architectural) | pending 2.1 |
 | 2.3 | Honest economics | SLM-reads-then-LLM-reasons costs less | SLM prefill + translate + LLM upper-stack-only < LLM full prefill, at equal accuracy | not cheaper → "outsourceable" is true but pointless (Proof-5-shaped stop, one level up) | pending 2.2 |
@@ -267,6 +267,22 @@ was "does latent beat text" — it didn't, sparse. Chain 2 ends the same way one
 rung again. The residual-stream + full-handoff + behavioral-objective reframing gives it a
 *better* shot than sparse had, but the Proof-5 ghost is real — the thing to beat is still
 "just hand over the retrieved text," now produced by the SLM.
+
+> **Result (2026-07-02):** Proof 2.0 (residual-equivalence) **passes — RESIDUAL_SUFFICIENT.**
+> On the zero-memory synthetic 2-hop gated set (n=40, L12, q-fair capture, think-on,
+> LLM-judge; gate clean at 40/40, 0.0 closed-book discard, A=1.00), recomputing the upper
+> stack from the layer-12 residual matches injecting the stored cache: **`residual_inject −
+> cache_inject = 0.000` strict** (item-for-item identical) and **−0.025 by judge — a single
+> item of 40** (`residual_inject = 0.95` judge vs `cache_inject = 0.97`, `A = 1.00`). The
+> per-item confusion is **clean, not differently-lossy**: 38 both-pass, 1 both-fail, **1
+> cache-only, 0 resid-only** (agreement 0.975). The decisive diagnostic is the upper-KV
+> drift — **cos_k 0.99987, cos_v 0.99946, MSE ≈ 1e-3** — so the recomputed cache is
+> numerically the stored one, the residual *determines* the upper stack (the split-forward
+> docstring's asserted identity, now measured), and the lone judge disagreement is
+> boundary/oscillation noise, **not** a structural loss. Sanity holds: `cache_inject − A =
+> −0.025` replicates Proof 5's `latent_all ≈ A`. **The SLM's target is one `(N, d)` tensor,
+> not the 68-layer cache — Proof 2.1's oracle map aims at the tractable object. Green light
+> to Proof 2.1.** CPU correctness was pre-proven by self-test invariant G.
 
 ---
 
