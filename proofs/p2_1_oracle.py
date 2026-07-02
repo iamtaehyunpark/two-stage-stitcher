@@ -102,16 +102,38 @@ AGREE_TOL = 0.10
 # ── Qwen loader ───────────────────────────────────────────────────────────────
 
 def load_qwen(cfg, device=None):
+    """Load Qwen2.5-7B onto `device`.
+
+    Avoids `device_map=` (a string device passed to from_pretrained) because newer
+    transformers 4.4x versions added `caching_allocator_warmup` which calls
+    `torch.cuda.mem_get_info(index)` on every mapped device — and that fails with
+    "invalid device ordinal" when the CUDA environment doesn't expose the expected
+    GPU index. For a 7B model (≈14 GB bf16), loading on CPU then `.to(device)` is
+    safe, bypasses caching_allocator_warmup, and works across all 4.x versions.
+    """
     from transformers import AutoTokenizer, AutoModelForCausalLM
     device = device or cfg.source_device
     dtype = getattr(torch, cfg.dtype)
-    print(f"Loading Qwen {cfg.source_model} on {device} …")
+
+    # Fail fast: validate the target device before a multi-GB download/load.
+    try:
+        torch.zeros(1, device=device)
+    except (RuntimeError, AssertionError) as e:
+        n = torch.cuda.device_count()
+        raise RuntimeError(
+            f"Qwen target device {device!r} is not available "
+            f"(CUDA sees {n} device(s): cuda:0 … cuda:{n-1}). "
+            "Pass --qwen-device to an available device, or set "
+            "CUDA_VISIBLE_DEVICES to expose at least 4 GPUs so cuda:3 exists."
+        ) from e
+
+    print(f"Loading Qwen {cfg.source_model} on {device} (CPU → .to(device)) …")
     tok = AutoTokenizer.from_pretrained(cfg.source_model)
     model = AutoModelForCausalLM.from_pretrained(
         cfg.source_model,
         torch_dtype=dtype,
-        device_map=device,
-    )
+        low_cpu_mem_usage=True,   # load weights one module at a time to cap peak RAM
+    ).to(device)
     model.eval()
     return tok, model
 
