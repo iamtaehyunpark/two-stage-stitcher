@@ -864,10 +864,28 @@ def main():
     ap.add_argument("--qwen-device", default="cuda:3",
                     help="device for Qwen2.5-7B (default cuda:3; logical index within "
                          "CUDA_VISIBLE_DEVICES)")
+    
+    # Detect available GPUs to adjust defaults dynamically if 1 GPU is selected
+    try:
+        if torch.cuda.is_available():
+            num_gpus = torch.cuda.device_count()
+            if num_gpus == 1:
+                ap.set_defaults(gpus="0", qwen_device="cuda:0")
+    except Exception:
+        pass
+
+    ap.add_argument("--max-gpu-memory", default="70GiB",
+                    help="maximum memory per GPU (e.g. 70GiB, 140GiB or just 140)")
     ap.add_argument("--gate-cache", default=None,
                     help="path to cache/reuse the gated set (default derived from --out)")
     ap.add_argument("--out", default="proofs/data/p2_1.json")
     args = ap.parse_args()
+
+    max_gpu_mem = args.max_gpu_memory
+    if isinstance(max_gpu_mem, str) and max_gpu_mem.isdigit():
+        max_gpu_mem = f"{max_gpu_mem}GiB"
+    elif isinstance(max_gpu_mem, (int, float)):
+        max_gpu_mem = f"{int(max_gpu_mem)}GiB"
 
     # ── Rescore path (no GPU) ────────────────────────────────────────────────
     if args.rescore:
@@ -911,8 +929,8 @@ def main():
 
     # ── Gate (needs DeepSeek) ────────────────────────────────────────────────
     if not args.tier2_only:
-        print(f"Loading DeepSeek-70B across GPUs {devices} …")
-        ds_tok, ds_model = load_deepseek(cfg, devices=devices)
+        print(f"Loading DeepSeek-70B across GPUs {devices} (max_memory={max_gpu_mem}) …")
+        ds_tok, ds_model = load_deepseek(cfg, devices=devices, max_memory_per_gpu=max_gpu_mem)
 
         if not need_gate:
             with open(gate_cache) as f:
@@ -973,8 +991,8 @@ def main():
         print(f"[tier2-only] {len(tier1_records)} tier1 records, "
               f"{len(states)} state entries loaded")
 
-        print(f"Loading DeepSeek-70B across GPUs {devices} …")
-        ds_tok, ds_model = load_deepseek(cfg, devices=devices)
+        print(f"Loading DeepSeek-70B across GPUs {devices} (max_memory={max_gpu_mem}) …")
+        ds_tok, ds_model = load_deepseek(cfg, devices=devices, max_memory_per_gpu=max_gpu_mem)
 
     # ── Tier 2 (needs DeepSeek) ──────────────────────────────────────────────
     tier2_records = run_tier2(
