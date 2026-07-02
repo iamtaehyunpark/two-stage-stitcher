@@ -123,8 +123,7 @@ def load_qwen(cfg, device=None):
         raise RuntimeError(
             f"Qwen target device {device!r} is not available "
             f"(CUDA sees {n} device(s): cuda:0 … cuda:{n-1}). "
-            "Pass --qwen-device to an available device, or set "
-            "CUDA_VISIBLE_DEVICES to expose at least 4 GPUs so cuda:3 exists."
+            "Pass --qwen-device to one of the DeepSeek shard GPUs (default cuda:0)."
         ) from e
 
     print(f"Loading Qwen {cfg.source_model} on {device} (CPU → .to(device)) …")
@@ -883,9 +882,10 @@ def main():
     ap.add_argument("--gpus", default="0,1,2",
                     help="logical GPU indices for DeepSeek (select physical GPUs with "
                          "CUDA_VISIBLE_DEVICES; Qwen goes on --qwen-device)")
-    ap.add_argument("--qwen-device", default="cuda:3",
-                    help="device for Qwen2.5-7B (default cuda:3; logical index within "
-                         "CUDA_VISIBLE_DEVICES)")
+    ap.add_argument("--qwen-device", default="cuda:0",
+                    help="device for Qwen2.5-7B (default cuda:0 — co-locates with "
+                         "DeepSeek's first shard; ~33 GB free on each 80 GB H200 "
+                         "after DeepSeek-70B sharding, well above Qwen-7B's ~14 GB)")
     
     # Detect available GPUs to adjust defaults dynamically if 1 GPU is selected
     try:
