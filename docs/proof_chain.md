@@ -251,15 +251,15 @@ Every rung is gated on the previous, and each can stop the project cheaply.
 |---|---|---|---|---|---|
 | 2.0 | Residual-equivalence | the small object suffices as the handoff target | `residual_inject ≈ cache_inject ≈ A`, clean per-item agreement | recompute-from-residual loses what the stored cache had → SLM on the hook for a bigger object | **PASS — RESIDUAL_SUFFICIENT** (`proofs/p2_0_residual.py`; strict resid−cache = 0.000, judge −0.025 = 1/40, upper-KV cos ≈ 0.9999) |
 | 2.1 | Cross-family geometry (oracle map) | the SLM→LLM spaces are bridgeable | an *oracle-fit* map from Qwen states lets the LLM recall the fact | even an overfit oracle map fails → geometry fundamentally misaligned at L12; no stitcher saves it → **kills the outsourcing thesis** | **harness implemented** (`proofs/p2_1_oracle.py`); pending first run |
-| 2.2 | Learned outsourcing (the SLM stitcher) | a *trained* cheap reader bridges it | stitched L12 residuals recover recall at **full** handoff | translation is the real bottleneck (now known to be real, not architectural) | pending 2.1 |
+| 2.4 | Content-token error tolerance | the fidelity target 2.2 must hit (before training) | tolerance curve gives threshold: content-token cos ≥ X → recall ≥ 0.9; control shows structural tokens are not the bottleneck | tolerance so tight (X > 0.99) the stitcher cannot realistically land in the safe zone → informs go/no-go for 2.2 | pending 2.1 |
+| 2.2 | Learned outsourcing (the SLM stitcher) | a *trained* cheap reader bridges it | stitched L12 residuals recover recall at **full** handoff, reaching the content-token fidelity threshold 2.4 set | translation is the real bottleneck (now known to be real, not architectural) | pending 2.4 |
 | 2.3 | Honest economics | SLM-reads-then-LLM-reasons costs less | SLM prefill + translate + LLM upper-stack-only < LLM full prefill, at equal accuracy | not cheaper → "outsourceable" is true but pointless (Proof-5-shaped stop, one level up) | pending 2.2 |
-| 2.4 | Error amplification | the SLM's approximation survives 68-layer recompute | recall tolerance ≥ the stitcher's achievable injected-state error | approximate L12 state gets amplified through the upper stack → breaks 2.2 in practice | pending 2.2 |
 | 2.5+ | Outsourced latent > outsourced text | it beats the boring alternative | latent handoff beats "SLM extracts text, feed the LLM tokens" — at length, across tokenizers | the Proof-5 ghost, one level up: outsourced *text* already does it | frontier |
 
 **The spine:** 2.0 the small object suffices (single-model) → 2.1 the cross-family gap is
-bridgeable (oracle, no training) → 2.2 a trained cheap reader bridges it (full handoff,
-behavioral loss) → 2.3 it's actually cheaper → 2.4 the error survives recompute → 2.5 it
-beats outsourced *text*.
+bridgeable (oracle, no training) → **2.4 fix the fidelity target** (content-token tolerance
+curve, before any training) → 2.2 a trained cheap reader bridges it (full handoff, behavioral
+loss, to the threshold 2.4 set) → 2.3 it's actually cheaper → 2.5 it beats outsourced *text*.
 
 **The symmetry with Chain 1, and why it's honest.** Chain 1 ran 0→…→5 and its final rung
 was "does latent beat text" — it didn't, sparse. Chain 2 ends the same way one level up:
@@ -411,16 +411,56 @@ cross-family geometry is fundamentally misaligned at layer 12 and no stitcher wi
 This is the **falsifier for the whole outsourcing thesis**, and it uses **zero training** — the
 cheapest way to kill or greenlight Proof 2.2.
 
+## Proof 2.4 — Content-token error tolerance (before training anything)
+
+**Why before 2.2.** You are about to train a stitcher. Before spending a training run, you need
+the target: how accurate must the stitcher's content-token residuals be for recall to survive the
+68-layer recompute? Proof 2.1 gave you one data point (content tokens at cos ≈ 0.6 → recall
+≈ 0.2). Proof 2.4 gives you the whole curve, so Proof 2.2 has a number to hit instead of
+training blind. It also answers the amplification question by construction: a steep cliff means
+the 68-layer recompute amplifies content error; a gentle slope means content tokens are just
+intrinsically hard. Either way, the answer is *measured*, not inferred from a later artifact.
+
+**The question.** Injecting DeepSeek's own true layer-12 residual, perturb *only* the
+content-token positions by a controlled amount, hold structural tokens at true, and measure the
+recall cliff. This isolates "how good must content tokens be" from "how good must everything be"
+— the distinction Proof 2.1 proved matters.
+
+**Design.** Start from `residual_inject_true` (the 0.95-ceiling condition from Proof 2.0, known
+good).
+
+1. Identify content-token positions (entity/number/answer-bearing tokens) vs. structural
+   positions per item. The fidelity metric already does this.
+2. Inject perturbed residuals: content tokens replaced by `true + ε·noise` calibrated to hit a
+   target per-content-token cosine; sweep target cos ∈ {0.99, 0.97, 0.95, 0.90, 0.80, 0.70,
+   0.60}. Structural tokens stay true throughout.
+3. Measure recall at each fidelity level → the tolerance curve.
+4. **Control:** sweep perturbing structural tokens only, content held true. If structural
+   perturbation barely dents recall while content perturbation cliffs, you have proven that
+   content-token fidelity is the sole target — and quantified the threshold.
+
+**What you get.** The number Proof 2.2 needs: "stitcher must reach content-token cos ≥ X for
+recall ≥ 0.9." If X ≈ 0.9 the stitcher's job is ordinary. If X ≈ 0.99 it is hard, and you want
+to know that before a training run. The slope also resolves the amplification question directly:
+steep cliff → 68-layer recompute amplifies content error (real risk for 2.2); gentle slope →
+content tokens are intrinsically hard but the recompute doesn't worsen it.
+
+**Cheap.** Single model, no training, reuses the residual path and content-token tagging. An
+afternoon.
+
 ## Proof 2.2 — Learned outsourcing (the SLM stitcher, full handoff)
 
 **Claim:** a *trained* SLM→LLM map produces layer-12 residuals good enough that recall
-survives — at **full-document** handoff. This is the real Proof 6, reshaped by everything
-learned: **full handoff** (sparse is dead — Proof 5), **residual-stream target** (small object
-— Proof 2.0), **behavioral objective** — KL between the injected model's logits and
-full-prefill's logits, *not* cosine (the lesson the post-mortem proved: cosine certifies
-nothing). Trained on the geometry Proof 2.1 proved bridgeable. **Pass:** stitched states
-recover the synthetic facts and fail the wrong-document control. **Fail:** translation is the
-bottleneck after all — now known to be *real* (not the architecture), worth investing in.
+survives — at **full-document** handoff, hitting the content-token fidelity threshold Proof 2.4
+established. This is the real Proof 6, reshaped by everything learned: **full handoff** (sparse
+is dead — Proof 5), **residual-stream target** (small object — Proof 2.0), **behavioral
+objective** — KL between the injected model's logits and full-prefill's logits, *not* cosine
+(the lesson the post-mortem proved: cosine certifies nothing). Trained on the geometry Proof 2.1
+proved bridgeable, aimed at the tolerance band Proof 2.4 mapped. The training target is
+**content-token fidelity to the 2.4 threshold**, not global cosine — global cosine lies.
+**Pass:** stitched states recover the synthetic facts and fail the wrong-document control,
+achieving content-token cos ≥ X (2.4's threshold) on held-out docs. **Fail:** translation is
+the bottleneck after all — now known to be *real* (not the architecture), worth investing in.
 
 ## Proof 2.3 — The honest economics
 
@@ -430,15 +470,6 @@ forward, vs. LLM full prefill — including the cost the residual path incurs by
 *recompute* layers 12→80 (you skipped 0–11, not the whole read). **Pass:** cheaper at equal
 accuracy. **Fail:** "outsourceable" is true but pointless — the same shape of honest stop as
 Proof 5, one level up.
-
-## Proof 2.4 — Error amplification (the sender's real risk)
-
-**Claim:** the SLM's approximation error, injected at layer 12, survives 68 layers of recompute.
-**Why its own rung:** unique to the residual path — a stitched (approximate) layer-12 state gets
-*amplified* through the recomputed upper stack, unlike an injected cache where the approximation
-stays local. This is the thing most likely to break Proof 2.2 in practice. **Experiment:**
-measure recall vs. injected-state error, find the tolerance, and check whether the stitcher's
-achievable accuracy (from 2.2) lands inside it.
 
 ## Proofs 2.5+ — The frontier
 
@@ -456,13 +487,15 @@ this to be the hard rung again.
   object the receiver accepts. Single-model, cheap, runnable now.
 - **2.1 is the outsourcing falsifier** — if an oracle map can't bridge the geometry, no trained
   one will. Zero training.
-- **2.2 is the only rung that trains the SLM** — earned only after 2.0 defines the target and
-  2.1 proves it reachable.
-- **2.3 + 2.4 size and stress the win** — is it cheaper, and does the approximation survive
-  recompute.
+- **2.4 fixes the training target** — single-model, no training, maps the recall cliff vs.
+  content-token cosine. Gives Proof 2.2 a concrete threshold to aim at instead of training
+  blind. Also resolves whether the 68-layer recompute amplifies content error (steep cliff) or
+  not (gentle slope). Must run before 2.2.
+- **2.2 is the only rung that trains the SLM** — earned only after 2.0 defines the object,
+  2.1 proves the geometry bridgeable, and 2.4 sets the fidelity target.
+- **2.3 sizes the economic win** — is SLM-reads-then-LLM-reasons actually cheaper?
 - **2.5 proves you beat the boring baseline** — outsourced latent vs outsourced text, the
   hard rung.
 
-The first runnable thing is **Proof 2.0**: cheap, single-model, no SLM, no training, reusing
-the existing `p5`-style harness. It's the afternoon that tells you whether the entire
-outsourcing chain aims at a small target or a hopeless one.
+The runnable spine from here: **2.1** (pending first run) → **2.4** (fix the target, one
+afternoon, single-model) → **2.2** (train to it) → **2.3** → **2.5**.
