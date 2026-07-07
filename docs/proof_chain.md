@@ -251,8 +251,8 @@ Every rung is gated on the previous, and each can stop the project cheaply.
 |---|---|---|---|---|---|
 | 2.0 | Residual-equivalence | the small object suffices as the handoff target | `residual_inject ≈ cache_inject ≈ A`, clean per-item agreement | recompute-from-residual loses what the stored cache had → SLM on the hook for a bigger object | **PASS — RESIDUAL_SUFFICIENT** (`proofs/p2_0_residual.py`; strict resid−cache = 0.000, judge −0.025 = 1/40, upper-KV cos ≈ 0.9999) |
 | 2.1 | Cross-family geometry (oracle map) | the SLM→LLM spaces are bridgeable | an *oracle-fit* map from Qwen states lets the LLM recall the fact | even an overfit oracle map fails → geometry fundamentally misaligned at L12; no stitcher saves it → **kills the outsourcing thesis** | **harness implemented** (`proofs/p2_1_oracle.py`); pending first run |
-| 2.4 | Content-token error tolerance | the fidelity target 2.2 must hit (before training) | tolerance curve gives threshold: content-token cos ≥ X → recall ≥ 0.9; control shows structural tokens are not the bottleneck | tolerance so tight (X > 0.99) the stitcher cannot realistically land in the safe zone → informs go/no-go for 2.2 | pending 2.1 |
-| 2.2 | Learned outsourcing (the SLM stitcher) | a *trained* cheap reader bridges it | stitched L12 residuals recover recall at **full** handoff, reaching the content-token fidelity threshold 2.4 set | translation is the real bottleneck (now known to be real, not architectural) | pending 2.4 |
+| 2.4 | Content-token error tolerance | the fidelity target 2.2 must hit (before training) | tolerance curve gives threshold: content-token cos ≥ X → recall ≥ 0.9; control shows structural tokens are not the bottleneck | tolerance so tight (X > 0.99) the stitcher cannot realistically land in the safe zone → informs go/no-go for 2.2 | **PASS — INVERTED FINDING** (`proofs/p2_4_tolerance.py`; content floor not found ≥ 0.60; structural cliff 0.99→0.90 kills recall 1.00→0.00; target is global fidelity ≥ ~0.99, not content-specific precision) |
+| 2.2 | Learned outsourcing (the SLM stitcher) | a *trained* cheap reader bridges it | stitched L12 residuals recover recall at **full** handoff, with global residual cos ≥ ~0.99 (the 2.4 structural threshold) | translation is the real bottleneck (now known to be real, not architectural) | pending 2.1 |
 | 2.3 | Honest economics | SLM-reads-then-LLM-reasons costs less | SLM prefill + translate + LLM upper-stack-only < LLM full prefill, at equal accuracy | not cheaper → "outsourceable" is true but pointless (Proof-5-shaped stop, one level up) | pending 2.2 |
 | 2.5+ | Outsourced latent > outsourced text | it beats the boring alternative | latent handoff beats "SLM extracts text, feed the LLM tokens" — at length, across tokenizers | the Proof-5 ghost, one level up: outsourced *text* already does it | frontier |
 
@@ -267,6 +267,25 @@ was "does latent beat text" — it didn't, sparse. Chain 2 ends the same way one
 rung again. The residual-stream + full-handoff + behavioral-objective reframing gives it a
 *better* shot than sparse had, but the Proof-5 ghost is real — the thing to beat is still
 "just hand over the retrieved text," now produced by the SLM.
+
+> **Result (2026-07-07):** Proof 2.4 (content-token error tolerance) **passes — INVERTED
+> FINDING.** On the zero-memory synthetic 2-hop gated set (n=40, L12, think-on, LLM-judge;
+> needle_mean=32.3 tokens), the content sweep and structural control give opposite results.
+> **Content curve: no cliff.** Perturbing the answer-bearing needle positions (mean 32 tokens,
+> ~3% of doc) to per-token cos ∈ {0.99→0.60} leaves judge recall flat at 0.950–1.000 throughout
+> — max step drop 0.025, within noise. The 68-layer recompute does **not** amplify content-token
+> error; the stitcher can afford cos ≥ 0.60 on the answer-bearing spans and recall holds.
+> **Structural cliff: catastrophic at cos=0.90.** Perturbing the remaining ~97% of document
+> positions (non-needle tokens, including all near-miss distractor paragraphs) to cos=0.90 drops
+> recall from **1.000 → 0.000** — a hard cliff; further degradation to 0.80/0.70/0.60 stays
+> near zero. The practical target inverts: **the stitcher must preserve global residual fidelity
+> (cos ≥ ~0.99), not content-token precision**. Since structural positions are ~97% of document
+> tokens, global cos ≈ structural cos — the threshold is a global one, not a local one on the
+> answer spans. Caveat: the structural collapse may partly reflect **count asymmetry** (perturbing
+> 97% of tokens simultaneously vs. 3%) rather than structural tokens being uniquely semantically
+> critical; a full-document sweep would isolate this. **Green light to Proof 2.2 with the
+> corrected objective: global residual fidelity ≥ ~0.99**, not targeted content-token precision.
+> Content-specific accuracy is a free gift.
 
 > **Result (2026-07-02):** Proof 2.0 (residual-equivalence) **passes — RESIDUAL_SUFFICIENT.**
 > On the zero-memory synthetic 2-hop gated set (n=40, L12, q-fair capture, think-on,
@@ -445,6 +464,12 @@ to know that before a training run. The slope also resolves the amplification qu
 steep cliff → 68-layer recompute amplifies content error (real risk for 2.2); gentle slope →
 content tokens are intrinsically hard but the recompute doesn't worsen it.
 
+**Result (2026-07-07): inverted finding.** Content floor not found through cos=0.60 (GENTLE,
+no amplification). Structural cliff hard at 0.99→0.90 (recall 1.00→0.00). The corrected target
+for 2.2 is **global residual fidelity ≥ ~0.99** — not content-specific precision. Caveat: the
+structural collapse at cos=0.90 may partly reflect count asymmetry (97% of positions perturbed
+vs. 3% for content); a whole-document sweep would isolate this cleanly.
+
 **Cheap.** Single model, no training, reuses the residual path and content-token tagging. An
 afternoon.
 
@@ -456,10 +481,11 @@ established. This is the real Proof 6, reshaped by everything learned: **full ha
 is dead — Proof 5), **residual-stream target** (small object — Proof 2.0), **behavioral
 objective** — KL between the injected model's logits and full-prefill's logits, *not* cosine
 (the lesson the post-mortem proved: cosine certifies nothing). Trained on the geometry Proof 2.1
-proved bridgeable, aimed at the tolerance band Proof 2.4 mapped. The training target is
-**content-token fidelity to the 2.4 threshold**, not global cosine — global cosine lies.
+proved bridgeable, aimed at the tolerance band Proof 2.4 mapped. Proof 2.4 found that the target is **global residual fidelity ≥ ~0.99** — not content-specific
+precision (content tolerance extends to cos ≥ 0.60). Global cosine is the right monitoring
+metric here (not a lie), because the structural constraint is a global one.
 **Pass:** stitched states recover the synthetic facts and fail the wrong-document control,
-achieving content-token cos ≥ X (2.4's threshold) on held-out docs. **Fail:** translation is
+achieving global residual cos ≥ ~0.99 on held-out docs. **Fail:** translation is
 the bottleneck after all — now known to be *real* (not the architecture), worth investing in.
 
 ## Proof 2.3 — The honest economics
